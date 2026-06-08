@@ -1703,6 +1703,33 @@ select {
   display: block;
 }
 
+@media (min-width: 841px) {
+  .trade-section-tabs {
+    display: none;
+  }
+
+  .trade-modal[data-trade-view] .trade-main,
+  .trade-modal[data-trade-view] .trade-side,
+  .trade-modal[data-trade-view] .swap-panel,
+  .trade-modal[data-trade-view] .bonding-panel,
+  .trade-modal[data-trade-view] .token-info-panel,
+  .trade-modal[data-trade-view] .holder-panel,
+  .trade-modal[data-trade-view] .chart-toolbar,
+  .trade-modal[data-trade-view] .roo-chart,
+  .trade-modal[data-trade-view] .trade-tabs,
+  .trade-modal[data-trade-view] .trade-table {
+    display: block;
+  }
+
+  .trade-modal[data-trade-view] .trade-layout {
+    display: grid;
+  }
+
+  .trade-modal[data-trade-view] .trade-side {
+    display: grid;
+  }
+}
+
 .trade-main,
 .swap-panel,
 .bonding-panel,
@@ -2813,8 +2840,13 @@ select {
 
   .trade-section-tabs {
     order: 0;
+    position: sticky;
+    top: 0;
+    z-index: 5;
     gap: 8px;
     padding: 6px;
+    background: rgba(10, 11, 14, 0.94);
+    backdrop-filter: blur(16px);
   }
 
   .trade-section-tabs button {
