@@ -2679,13 +2679,60 @@ select {
   }
 
   .trade-token-head,
-  .trade-stats,
-  .trade-row {
+  .trade-stats {
     grid-template-columns: 1fr;
   }
 
-  .trade-token-head {
-    display: grid;
+  .trade-side {
+    order: -1;
+  }
+
+  .bonding-panel,
+  .token-info-panel {
+    display: none;
+  }
+
+  .trade-main {
+    overflow: hidden;
+  }
+
+  .trade-token-head,
+  .trade-stats,
+  .chart-toolbar,
+  .roo-chart {
+    display: none;
+  }
+
+  .trade-tabs {
+    padding: 14px 16px 0;
+    gap: 26px;
+  }
+
+  .trade-table {
+    padding: 0 12px 14px;
+  }
+
+  .trade-row {
+    grid-template-columns: minmax(0, 1.3fr) minmax(82px, 0.8fr) minmax(78px, 0.8fr);
+    gap: 10px;
+    padding: 12px 10px;
+    font-size: 13px;
+  }
+
+  .trade-row span:nth-child(2),
+  .trade-row span:nth-child(4),
+  .trade-row span:nth-child(6),
+  .trade-row strong:nth-child(2),
+  .trade-row strong:nth-child(4),
+  .trade-row button {
+    display: none;
+  }
+
+  .trade-row:not(.trade-row-head) {
+    min-height: 54px;
+    margin-top: 10px;
+    border-left: 3px solid rgba(0, 240, 255, 0.32);
+    border-radius: 12px;
   }
 
   .trade-price-box {
