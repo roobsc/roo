@@ -5,6 +5,7 @@ const postgres = require("postgres");
 const { put } = require("@vercel/blob");
 
 const root = __dirname;
+const publicRoot = path.join(root, "public");
 const port = Number(process.env.PORT || 4301);
 const dataDir = path.join(root, "data");
 const dbPath = path.join(dataDir, "launchpad-db.json");
@@ -664,10 +665,10 @@ async function handleApi(req, res, url) {
 function serveStatic(req, res, url) {
   const urlPath = decodeURIComponent(url.pathname || "/");
   const safePath = path.normalize(urlPath).replace(/^(\.\.(\/|\\|$))+/, "");
-  let filePath = path.join(root, safePath);
+  let filePath = path.join(publicRoot, safePath);
 
   if (urlPath === "/" || urlPath === "") {
-    filePath = path.join(root, "index.html");
+    filePath = path.join(publicRoot, "index.html");
   }
 
   fs.stat(filePath, (err, stat) => {
