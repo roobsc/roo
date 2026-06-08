@@ -69,15 +69,6 @@
             <button type="button" data-lang="en">EN</button>
             <button class="active" type="button" data-lang="zh">中文</button>
           </div>
-          <details class="top-menu">
-            <summary>•••</summary>
-            <div class="top-menu-panel">
-              <div class="language-toggle" aria-label="Language">
-                <button type="button" data-lang="en">EN</button>
-                <button class="active" type="button" data-lang="zh">中文</button>
-              </div>
-            </div>
-          </details>
           <button id="networkButton" class="network-chip" type="button">BSC</button>
           <button id="connectButton" class="wallet-button" type="button">连接钱包</button>
         </div>
@@ -669,7 +660,15 @@
             <section class="holder-panel">
               <div class="holder-head">
                 <h3>持币地址</h3>
-                <span id="holderCountText">0</span>
+                <span><strong id="holderCountText">0</strong> 位</span>
+              </div>
+              <div class="holder-supply-row">
+                <span>总供应量</span>
+                <strong id="holderTotalSupply">10,000</strong>
+              </div>
+              <div class="holder-column-head">
+                <span>持有者</span>
+                <span>百分比</span>
               </div>
               <div id="holderList" class="holder-list">
                 <span>暂无持币地址</span>

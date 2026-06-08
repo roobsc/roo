@@ -257,6 +257,13 @@ const ERC20_ABI = [
     type: "function"
   },
   {
+    inputs: [],
+    name: "totalSupply",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
     inputs: [{ name: "account", type: "address" }],
     name: "balanceOf",
     outputs: [{ name: "", type: "uint256" }],
@@ -483,10 +490,16 @@ async function buildProjectFromChain(projectId, basics, provider, launchpadContr
   const token = new ethers.Contract(basics.token, ERC20_ABI, provider);
   let name = `Project ${projectId}`;
   let symbol = `P${projectId}`;
+  let totalSupply = 10_000;
   try {
     [name, symbol] = await Promise.all([token.name(), token.symbol()]);
   } catch {
     // Some tokens may not expose metadata cleanly; keep fallback names.
+  }
+  try {
+    totalSupply = Number(ethers.formatEther(await token.totalSupply()));
+  } catch {
+    totalSupply = 10_000;
   }
   const launchThreshold = Number(ethers.formatEther(basics.launchThreshold || 0n));
   const bnbRaised = Number(ethers.formatEther(basics.bnbRaised || 0n));
@@ -513,6 +526,7 @@ async function buildProjectFromChain(projectId, basics, provider, launchpadContr
     liquidityUsd: Number((bnbRaised * 600).toFixed(2)),
     bnbRaised,
     tokensSold,
+    totalSupply,
     priceBnb,
     creator: basics.creator,
     contract: basics.token,
@@ -575,10 +589,16 @@ async function findProjectByTokenAddress(tokenAddress) {
     const token = new ethers.Contract(basics.token, ERC20_ABI, provider);
     let name = `Project ${projectId}`;
     let symbol = `P${projectId}`;
+    let totalSupply = 10_000;
     try {
       [name, symbol] = await Promise.all([token.name(), token.symbol()]);
     } catch {
       // Some tokens may not expose metadata cleanly; keep fallback names.
+    }
+    try {
+      totalSupply = Number(ethers.formatEther(await token.totalSupply()));
+    } catch {
+      totalSupply = 10_000;
     }
     const launchThreshold = Number(ethers.formatEther(basics.launchThreshold || 0n));
     const bnbRaised = Number(ethers.formatEther(basics.bnbRaised || 0n));
@@ -601,6 +621,7 @@ async function findProjectByTokenAddress(tokenAddress) {
       liquidityUsd: Number((bnbRaised * 600).toFixed(2)),
       bnbRaised,
       tokensSold,
+      totalSupply,
       priceBnb,
       creator: basics.creator,
       contract: basics.token,
@@ -628,6 +649,16 @@ function formatMarketCap(value) {
     return `${(value / 1_000).toFixed(value >= 100_000 ? 0 : 2)}K`;
   }
   return String(value);
+}
+
+function formatTokenAmount(value, digits = 3) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number)) {
+    return "0";
+  }
+  return number.toLocaleString(undefined, {
+    maximumFractionDigits: digits
+  });
 }
 
 function formatUsd(value, digits = 2) {
@@ -1240,24 +1271,102 @@ function setLanguage(lang) {
   }
 }
 
-function drawTradeChart(project, backendCandles = null) {
+function normalizeChartCandles(rawCandles = [], fallbackPrice = 0) {
+  const sorted = (rawCandles || [])
+    .map((candle) => ({
+      time: Number(candle.time || candle.timestamp || Date.now()),
+      open: Number(candle.open || 0),
+      high: Number(candle.high || 0),
+      low: Number(candle.low || 0),
+      close: Number(candle.close || 0),
+      volume: Number(candle.volume || 0)
+    }))
+    .filter((candle) => candle.close > 0)
+    .sort((a, b) => a.time - b.time);
+
+  if (!sorted.length && fallbackPrice > 0) {
+    const now = Date.now();
+    return Array.from({ length: 18 }, (_, index) => ({
+      time: now - (17 - index) * 60_000,
+      open: fallbackPrice,
+      high: fallbackPrice,
+      low: fallbackPrice,
+      close: fallbackPrice,
+      volume: 0,
+      synthetic: true
+    }));
+  }
+
+  if (!sorted.length) {
+    return [];
+  }
+
+  const interval = sorted.length > 1
+    ? Math.max(60_000, Math.min(300_000, sorted[1].time - sorted[0].time || 60_000))
+    : 60_000;
+  const filled = [];
+  sorted.forEach((candle, index) => {
+    const previous = filled[filled.length - 1];
+    if (previous) {
+      const gap = Math.floor((candle.time - previous.time) / interval);
+      const fillers = Math.min(18, Math.max(0, gap - 1));
+      for (let offset = 1; offset <= fillers; offset += 1) {
+        filled.push({
+          time: previous.time + interval * offset,
+          open: previous.close,
+          high: previous.close,
+          low: previous.close,
+          close: previous.close,
+          volume: 0,
+          synthetic: true
+        });
+      }
+    }
+    const open = index === 0 ? candle.open || candle.close : candle.open || filled[filled.length - 1].close;
+    filled.push({
+      ...candle,
+      open,
+      high: Math.max(candle.high || candle.close, open, candle.close),
+      low: Math.min(candle.low || candle.close, open, candle.close)
+    });
+  });
+
+  while (filled.length < 18) {
+    const first = filled[0];
+    filled.unshift({
+      time: first.time - interval,
+      open: first.open,
+      high: first.open,
+      low: first.open,
+      close: first.open,
+      volume: 0,
+      synthetic: true
+    });
+  }
+
+  return filled;
+}
+
+function drawTradeChart(project = {}, backendCandles = null) {
   const canvas = $("#tradeChart");
   const context = canvas.getContext("2d");
   const { width, height } = canvas;
-  const chartLeft = 54;
-  const chartRight = width - 84;
-  const chartTop = 38;
-  const chartBottom = height - 34;
+  const chartLeft = 52;
+  const chartRight = width - 96;
+  const chartTop = 42;
+  const chartBottom = height - 50;
   const chartWidth = chartRight - chartLeft;
   const chartHeight = chartBottom - chartTop;
   const formatPrice = (value) => Number(value || 0).toFixed(8).replace(/0+$/, "").replace(/\.$/, "");
-  const displayPrice = Number((backendCandles && backendCandles.length ? backendCandles[backendCandles.length - 1].close : project.priceBnb) || 0);
+  const fallbackPrice = Number(project.priceBnb || 0);
+  const candles = normalizeChartCandles(backendCandles || [], fallbackPrice);
+  const displayPrice = Number((candles.length ? candles[candles.length - 1].close : fallbackPrice) || 0);
 
   context.clearRect(0, 0, width, height);
-  context.fillStyle = "#171717";
+  context.fillStyle = "#161719";
   context.fillRect(0, 0, width, height);
 
-  context.strokeStyle = "rgba(255, 255, 255, 0.075)";
+  context.strokeStyle = "rgba(255, 255, 255, 0.07)";
   context.lineWidth = 1;
   for (let i = 0; i <= 8; i += 1) {
     const x = chartLeft + (chartWidth * i) / 8;
@@ -1274,7 +1383,6 @@ function drawTradeChart(project, backendCandles = null) {
     context.stroke();
   }
 
-  const candles = backendCandles || [];
   if (!candles.length) {
     context.fillStyle = "#37ff14";
     context.font = "16px sans-serif";
@@ -1291,11 +1399,11 @@ function drawTradeChart(project, backendCandles = null) {
   const top = max + padding;
   const bottom = Math.max(0, min - padding);
   const scaleY = (value) => chartBottom - ((value - bottom) / (top - bottom || 1)) * chartHeight;
-  const maxVisibleCandles = Math.max(1, Math.floor(chartWidth / 18));
+  const maxVisibleCandles = Math.max(18, Math.floor(chartWidth / 13));
   const visibleCandles = candles.slice(-maxVisibleCandles);
-  const step = 18;
-  const candleWidth = 8;
-  const startX = Math.max(chartLeft, chartRight - (visibleCandles.length - 1) * step - candleWidth);
+  const step = Math.max(8, Math.min(14, chartWidth / Math.max(visibleCandles.length, 1)));
+  const candleWidth = Math.max(4, Math.min(8, step * 0.58));
+  const startX = Math.max(chartLeft + 2, chartRight - (visibleCandles.length - 1) * step - candleWidth);
 
   const first = candles[0];
   const lastCandle = candles[candles.length - 1];
@@ -1324,6 +1432,20 @@ function drawTradeChart(project, backendCandles = null) {
     context.fillText(formatPrice(value), chartRight + 10, y + 4);
   }
 
+  context.strokeStyle = trendColor;
+  context.lineWidth = 1.3;
+  context.beginPath();
+  visibleCandles.forEach((candle, index) => {
+    const x = startX + index * step + candleWidth / 2;
+    const y = scaleY(candle.close);
+    if (index === 0) {
+      context.moveTo(x, y);
+    } else {
+      context.lineTo(x, y);
+    }
+  });
+  context.stroke();
+
   visibleCandles.forEach((candle, index) => {
     const x = startX + index * step;
     const isUp = candle.close >= candle.open;
@@ -1343,7 +1465,9 @@ function drawTradeChart(project, backendCandles = null) {
     const bodyHeight = Math.max(7, Math.abs(openY - closeY));
     const bodyY = Math.min(openY, closeY) - (bodyHeight === 7 ? 3.5 : 0);
     const bodyWidth = Math.max(6, candleWidth);
+    context.globalAlpha = candle.synthetic ? 0.42 : 1;
     context.fillRect(centerX - bodyWidth / 2, bodyY, bodyWidth, bodyHeight);
+    context.globalAlpha = 1;
   });
 
   const last = candles[candles.length - 1].close;
@@ -1802,6 +1926,8 @@ function setTradeView(view) {
 }
 
 function renderHolderList(project, trades = []) {
+  const symbol = project.symbol || "";
+  const totalSupply = Math.max(0, Number(project.totalSupply || 10_000));
   const holderMap = new Map();
   trades.forEach((trade) => {
     const account = normalizeAddress(trade.account);
@@ -1816,15 +1942,31 @@ function renderHolderList(project, trades = []) {
   const holders = Array.from(holderMap.values())
     .filter((holder) => holder.amount > 0.000001)
     .sort((a, b) => b.amount - a.amount);
+  const formatHolderPercent = (value) => {
+    if (!Number.isFinite(value) || value <= 0) {
+      return "0%";
+    }
+    return `${value >= 1 ? value.toFixed(2) : value.toFixed(4)}%`;
+  };
+  const topHolders = holders.slice(0, 10);
   $("#holderCountText").textContent = String(holders.length);
-  $("#holderList").innerHTML = holders.length
-    ? holders.slice(0, 20).map((holder) => `
+  $("#holderTotalSupply").textContent = `${formatTokenAmount(totalSupply, 3)} ${symbol}`;
+  $("#holderList").innerHTML = topHolders.length
+    ? topHolders.map((holder) => {
+      const percent = totalSupply > 0 ? (holder.amount / totalSupply) * 100 : 0;
+      const width = Math.max(0.4, Math.min(100, percent));
+      return `
       <div class="holder-row">
-        <span>${shortAddress(holder.account)}</span>
-        <strong>${holder.amount.toFixed(6)} ${project.symbol}</strong>
+        <div class="holder-row-main">
+          <span title="${escapeAttr(holder.account)}">${shortAddress(holder.account)}</span>
+          <strong>${formatHolderPercent(percent)}</strong>
+        </div>
+        <div class="holder-progress"><i style="width: ${width}%"></i></div>
+        <small>${formatTokenAmount(holder.amount, 6)} ${symbol}</small>
       </div>
-    `).join("")
-    : `<span>暂无持币地址</span>`;
+    `;
+    }).join("")
+    : `<span class="holder-empty">暂无持币地址</span>`;
 }
 
 async function refreshTradeData(project) {
@@ -2400,15 +2542,6 @@ function bindEvents() {
 
   $$(".tab").forEach((tab) => {
     tab.addEventListener("click", () => updateTabs(tab.dataset.tab));
-  });
-  $$(".top-menu-panel [data-tab]").forEach((button) => {
-    button.addEventListener("click", () => {
-      updateTabs(button.dataset.tab);
-      const menu = button.closest("details");
-      if (menu) {
-        menu.open = false;
-      }
-    });
   });
 
   $("#menuButton").addEventListener("click", openMenu);
