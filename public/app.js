@@ -391,10 +391,13 @@ function mergeProjects(realProjects) {
   realProjects.forEach((project) => {
     const key = project.projectId !== undefined && project.projectId !== null
       ? `id:${project.projectId}`
-      : `symbol:${project.symbol}`;
-    if (!byKey.has(key)) {
-      byKey.set(key, { ...project, avatarUrl: project.avatarUrl || defaultAvatar });
+      : `token:${normalizeAddress(project.contract || project.symbol)}`;
+    const existing = byKey.get(key);
+    const next = existing ? { ...existing, ...project } : { ...project };
+    if (existing && (!project.avatarUrl || project.avatarUrl === defaultAvatar) && existing.avatarUrl && existing.avatarUrl !== defaultAvatar) {
+      next.avatarUrl = existing.avatarUrl;
     }
+    byKey.set(key, { ...next, avatarUrl: next.avatarUrl || defaultAvatar });
   });
   projects = Array.from(byKey.values());
 }
@@ -424,15 +427,26 @@ function upsertLocalProject(project) {
     ? (item) => String(item.projectId) === String(project.projectId)
     : (item) => normalizeAddress(item.contract) === normalizeAddress(project.contract);
   const index = projects.findIndex(key);
+  const existing = index >= 0 ? projects[index] : null;
+  const merged = existing ? { ...existing, ...project } : { ...project };
+  if (existing && (!project.avatarUrl || project.avatarUrl === defaultAvatar) && existing.avatarUrl && existing.avatarUrl !== defaultAvatar) {
+    merged.avatarUrl = existing.avatarUrl;
+  }
+  if (existing && !project.createdAt && existing.createdAt) {
+    merged.createdAt = existing.createdAt;
+  }
+  if (existing && existing.metadata && !project.metadata) {
+    merged.metadata = existing.metadata;
+  }
   if (index >= 0) {
-    projects[index] = { ...projects[index], ...project };
+    projects[index] = merged;
   } else {
-    projects.unshift(project);
+    projects.unshift(merged);
   }
   renderTradeTicker();
   renderProjects();
-  apiPost("/api/projects/upsert", project).catch(() => {});
-  return project;
+  apiPost("/api/projects/upsert", merged).catch(() => {});
+  return merged;
 }
 
 function getProjectStage(launched, progress) {
@@ -457,6 +471,8 @@ async function buildProjectFromChain(projectId, basics, provider) {
   const launchThreshold = Number(ethers.formatEther(basics.launchThreshold || 0n));
   const bnbRaised = Number(ethers.formatEther(basics.bnbRaised || 0n));
   const tokensSold = Number(ethers.formatEther(basics.tokensSold || 0n));
+  const priceBnb = tokensSold > 0 ? bnbRaised / tokensSold : 0;
+  const marketCap = priceBnb > 0 ? priceBnb * 10_000 * 600 : bnbRaised * 600;
   const progress = launchThreshold > 0
     ? Math.min(100, Number(((bnbRaised / launchThreshold) * 100).toFixed(3)))
     : 0;
@@ -471,13 +487,16 @@ async function buildProjectFromChain(projectId, basics, provider) {
     cap: basics.walletCap ? Math.max(0, Number(ethers.formatEther(basics.walletCap))) : 100,
     raised: `${bnbRaised.toFixed(3)} / ${launchThreshold || 0} BNB`,
     holders: 0,
-    marketCap: Math.round((bnbRaised * 600) + tokensSold),
+    marketCap: Math.round(marketCap),
+    liquidityUsd: Number((bnbRaised * 600).toFixed(2)),
+    bnbRaised,
+    tokensSold,
+    priceBnb,
     creator: basics.creator,
     contract: basics.token,
     change: 0,
     listed: launched,
-    avatar: symbol.slice(0, 1).toUpperCase(),
-    avatarUrl: defaultAvatar
+    avatar: symbol.slice(0, 1).toUpperCase()
   };
 }
 
@@ -497,8 +516,7 @@ async function syncChainProjects(limit = 120) {
       try {
         const basics = await launchpad.getProjectBasics(BigInt(projectId));
         const chainProject = await buildProjectFromChain(projectId, basics, provider);
-        const existing = projects.find((project) => String(project.projectId) === String(chainProject.projectId));
-        upsertLocalProject(existing ? { ...chainProject, ...existing, ...chainProject } : chainProject);
+        upsertLocalProject(chainProject);
       } catch {
         // Keep syncing the rest even if one historical project cannot be read.
       }
@@ -542,6 +560,9 @@ async function findProjectByTokenAddress(tokenAddress) {
     }
     const launchThreshold = Number(ethers.formatEther(basics.launchThreshold || 0n));
     const bnbRaised = Number(ethers.formatEther(basics.bnbRaised || 0n));
+    const tokensSold = Number(ethers.formatEther(basics.tokensSold || 0n));
+    const priceBnb = tokensSold > 0 ? bnbRaised / tokensSold : 0;
+    const marketCap = priceBnb > 0 ? priceBnb * 10_000 * 600 : bnbRaised * 600;
     const progress = launchThreshold > 0 ? Math.min(100, Number(((bnbRaised / launchThreshold) * 100).toFixed(3))) : 0;
     return upsertLocalProject({
       projectId: String(projectId),
@@ -553,7 +574,11 @@ async function findProjectByTokenAddress(tokenAddress) {
       cap: basics.walletCap ? Math.max(0, Number(ethers.formatEther(basics.walletCap))) : 100,
       raised: `${bnbRaised.toFixed(3)} / ${launchThreshold || 0} BNB`,
       holders: 0,
-      marketCap: Math.round(bnbRaised * 600),
+      marketCap: Math.round(marketCap),
+      liquidityUsd: Number((bnbRaised * 600).toFixed(2)),
+      bnbRaised,
+      tokensSold,
+      priceBnb,
       creator: basics.creator,
       contract: basics.token,
       change: 0,
@@ -580,6 +605,36 @@ function formatMarketCap(value) {
     return `${(value / 1_000).toFixed(value >= 100_000 ? 0 : 2)}K`;
   }
   return String(value);
+}
+
+function formatUsd(value, digits = 2) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number) || number <= 0) {
+    return "$0";
+  }
+  return `$${formatMarketCap(Number(number.toFixed(digits)))}`;
+}
+
+function formatBnb(value, digits = 6) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number) || number <= 0) {
+    return "0 BNB";
+  }
+  return `${number.toFixed(digits).replace(/\.?0+$/, "")} BNB`;
+}
+
+function formatCreatedTime(project) {
+  const raw = project.createdAt || project.created_at || project.updatedAt || "";
+  const time = raw ? Date.parse(raw) : Number.NaN;
+  if (Number.isNaN(time)) {
+    return "--";
+  }
+  return new Date(time).toLocaleString();
+}
+
+function parseRaisedBnb(project) {
+  const match = String(project.raised || "").match(/^([0-9.]+)/);
+  return match ? Number(match[1]) : 0;
 }
 
 function parseLaunchThreshold(project) {
@@ -1163,10 +1218,10 @@ function drawTradeChart(project, backendCandles = null) {
   const context = canvas.getContext("2d");
   const { width, height } = canvas;
   context.clearRect(0, 0, width, height);
-  context.fillStyle = "#171717";
+  context.fillStyle = "#0e1017";
   context.fillRect(0, 0, width, height);
 
-  context.strokeStyle = "rgba(255, 224, 163, 0.08)";
+  context.strokeStyle = "rgba(0, 240, 255, 0.08)";
   context.lineWidth = 1;
   for (let x = 72; x < width; x += 96) {
     context.beginPath();
@@ -1183,7 +1238,7 @@ function drawTradeChart(project, backendCandles = null) {
 
   const candles = backendCandles || [];
   if (!candles.length) {
-    context.fillStyle = "#f3c98b";
+    context.fillStyle = "#00f0ff";
     context.font = "16px sans-serif";
     context.fillText("暂无真实成交 K 线", 54, 64);
     $("#chartPriceTag").textContent = "--";
@@ -1191,13 +1246,17 @@ function drawTradeChart(project, backendCandles = null) {
   }
   const max = Math.max(...candles.map((candle) => candle.high));
   const min = Math.min(...candles.map((candle) => candle.low));
-  const scaleY = (value) => height - 32 - ((value - min) / (max - min || 1)) * (height - 64);
+  const range = max - min;
+  const padding = range === 0 ? Math.max(max * 0.08, 0.00000001) : range * 0.12;
+  const top = max + padding;
+  const bottom = Math.max(0, min - padding);
+  const scaleY = (value) => height - 32 - ((value - bottom) / (top - bottom || 1)) * (height - 64);
   const candleWidth = Math.max(4, Math.floor((width - 90) / candles.length) - 3);
 
   candles.forEach((candle, index) => {
     const x = 54 + index * ((width - 90) / candles.length);
     const isUp = candle.close >= candle.open;
-    const color = isUp ? "#d27d3a" : "#ff4f3f";
+    const color = isUp ? "#00f0ff" : "#ff4f8b";
     context.strokeStyle = color;
     context.fillStyle = color;
     context.beginPath();
@@ -1212,7 +1271,7 @@ function drawTradeChart(project, backendCandles = null) {
   const last = candles[candles.length - 1].close;
   const y = scaleY(last);
   context.setLineDash([3, 4]);
-  context.strokeStyle = "rgba(255, 120, 78, 0.75)";
+  context.strokeStyle = "rgba(0, 240, 255, 0.75)";
   context.beginPath();
   context.moveTo(0, y);
   context.lineTo(width, y);
@@ -1250,7 +1309,33 @@ function renderTradeTable(project, backendTrades = null) {
   `;
 }
 
-function estimateSwapReceive() {
+function buildCandlesFromTrades(trades, bucketMs = 60_000) {
+  const buckets = new Map();
+  [...trades].reverse().forEach((trade) => {
+    const price = Number(trade.priceBnb || 0);
+    if (!price) {
+      return;
+    }
+    const time = Number(trade.timestamp || Date.now());
+    const bucket = Math.floor(time / bucketMs) * bucketMs;
+    const candle = buckets.get(bucket) || {
+      time: bucket,
+      open: price,
+      high: price,
+      low: price,
+      close: price,
+      volume: 0
+    };
+    candle.high = Math.max(candle.high, price);
+    candle.low = Math.min(candle.low, price);
+    candle.close = price;
+    candle.volume += Number(trade.bnbAmount || 0);
+    buckets.set(bucket, candle);
+  });
+  return Array.from(buckets.values()).sort((a, b) => a.time - b.time);
+}
+
+async function estimateSwapReceive() {
   const project = state.selectedProject;
   if (!project) {
     return;
@@ -1265,12 +1350,37 @@ function estimateSwapReceive() {
     return;
   }
   const amount = Math.max(0, Number($("#swapAmount").value || 0));
+  try {
+    if (window.ethers && amount > 0) {
+      const provider = window.ethereum
+        ? new ethers.BrowserProvider(window.ethereum)
+        : new ethers.JsonRpcProvider(config.rpcUrl || "https://bsc-dataseed.binance.org");
+      const launchpad = getLaunchpadContract(provider);
+      if (state.swapSide === "buy") {
+        const bnbAmount = ethers.parseEther(String(amount));
+        const oneTokenCost = await launchpad.quoteBuy(BigInt(project.projectId), ethers.parseEther("1"));
+        if (oneTokenCost > 0n) {
+          const estimated = (bnbAmount * ethers.parseEther("1")) / oneTokenCost;
+          $("#swapReceive").textContent = `您将收到: ${Number(ethers.formatEther(estimated)).toFixed(6)} ${project.symbol}`;
+          return;
+        }
+      } else {
+        const tokenAmount = ethers.parseEther(String(amount));
+        const estimatedBnb = await launchpad.quoteSell(BigInt(project.projectId), tokenAmount);
+        $("#swapReceive").textContent = `您将收到: ${Number(ethers.formatEther(estimatedBnb)).toFixed(6)} BNB`;
+        return;
+      }
+    }
+  } catch {
+    // Fall back to the local estimate below if the RPC read fails.
+  }
   if (state.swapSide === "buy") {
-    const estimated = (amount * 10_000) / Math.max(3, project.progress / 18);
-    $("#swapReceive").textContent = `您将收到: ${estimated.toFixed(3)} ${project.symbol}`;
+    const price = Number(project.priceBnb || 0);
+    const estimated = price > 0 ? amount / price : 0;
+    $("#swapReceive").textContent = `您将收到: ${estimated.toFixed(6)} ${project.symbol}`;
     return;
   }
-  const estimatedBnb = (amount * Math.max(3, project.progress / 18)) / 10_000;
+  const estimatedBnb = amount * Number(project.priceBnb || 0);
   $("#swapReceive").textContent = `您将收到: ${estimatedBnb.toFixed(6)} BNB`;
 }
 
@@ -1488,6 +1598,35 @@ function setSwapSide(side) {
   estimateSwapReceive();
 }
 
+function getTradeSummary(project, trades = []) {
+  const volumeBnb = trades.reduce((sum, trade) => sum + Number(trade.bnbAmount || 0), 0);
+  const volumeUsd = trades.reduce((sum, trade) => sum + Number(trade.usdAmount || 0), 0);
+  const lastTrade = trades[0] || null;
+  const priceBnb = lastTrade && Number(lastTrade.priceBnb || 0) > 0
+    ? Number(lastTrade.priceBnb)
+    : Number(project.priceBnb || 0);
+  const marketCap = priceBnb > 0 ? priceBnb * 10_000 * 600 : Number(project.marketCap || 0);
+  return {
+    count: trades.length,
+    volumeBnb,
+    volumeUsd,
+    priceBnb,
+    marketCap
+  };
+}
+
+function updateTradeStats(project, trades = []) {
+  const summary = getTradeSummary(project, trades);
+  const liquidityUsd = Number(project.liquidityUsd || 0) || parseRaisedBnb(project) * 600;
+  $("#tradePrice").textContent = summary.priceBnb > 0 ? formatBnb(summary.priceBnb, 8) : "--";
+  $("#tradeMarketCap").textContent = formatUsd(summary.marketCap, 2);
+  $("#tradeLiquidity").textContent = formatUsd(liquidityUsd, 2);
+  $("#tradeVolume").textContent = `${formatUsd(summary.volumeUsd, 2)} / ${summary.count} 笔`;
+  $("#tradeCreated").textContent = formatCreatedTime(project);
+  const remaining = Math.max(0, 10_000 - Number(project.tokensSold || 0));
+  $("#bondingText").innerHTML = `联合曲线中仍有 <strong>${remaining.toLocaleString(undefined, { maximumFractionDigits: 3 })} ${project.symbol}</strong> 可供出售；当前底池 <strong>${project.raised}</strong>。`;
+}
+
 async function refreshTradeData(project) {
   if (!project || project.projectId === undefined || project.projectId === null) {
     renderTradeTable(project);
@@ -1499,8 +1638,11 @@ async function refreshTradeData(project) {
       apiGet(`/api/trades?projectId=${encodeURIComponent(project.projectId)}`),
       apiGet(`/api/candles?projectId=${encodeURIComponent(project.projectId)}&interval=1m`)
     ]);
-    renderTradeTable(project, tradesData.trades || []);
-    drawTradeChart(project, candlesData.candles || []);
+    const trades = tradesData.trades || [];
+    const candles = (candlesData.candles || []).length ? candlesData.candles : buildCandlesFromTrades(trades);
+    renderTradeTable(project, trades);
+    updateTradeStats(project, trades);
+    drawTradeChart(project, candles);
   } catch {
     renderTradeTable(project);
     drawTradeChart(project);
@@ -1521,15 +1663,10 @@ function openTradeModal(project) {
   $("#copyTradeContract").dataset.address = contractAddress;
   $("#copyTradeContract").textContent = "复制";
   $("#tradeCreator").textContent = `创建者 ${project.creator}`;
-  $("#tradePrice").textContent = `${Math.max(0.000001, project.marketCap / 68_000_000).toFixed(6)} BNB`;
   $("#tradeChange").textContent = `+${project.change}%`;
-  $("#tradeMarketCap").textContent = `$${formatMarketCap(project.marketCap)}`;
-  $("#tradeLiquidity").textContent = `$${formatMarketCap(project.marketCap * 1.08)}`;
-  $("#tradeVolume").textContent = `$${formatMarketCap(project.marketCap * 2.93)}`;
-  $("#tradeCreated").textContent = project.listed ? "2026/06/08 00:08:46" : "刚刚";
+  updateTradeStats(project, []);
   $("#bondingValue").textContent = `${project.progress}%`;
   $("#bondingBar").style.width = `${Math.min(100, project.progress)}%`;
-  $("#bondingText").innerHTML = `联合曲线中仍有 <strong>${Math.round(project.marketCap * 728).toLocaleString()} ${project.symbol}</strong> 可供出售；当前底池 <strong>${project.raised}</strong>。`;
   $("#infoName").textContent = project.name;
   $("#infoSymbol").textContent = project.symbol;
   $("#infoDescription").textContent = project.listed

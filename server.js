@@ -240,10 +240,10 @@ async function getCandlesStore(projectId, interval) {
     )
     select
       bucket::bigint as time,
-      min(open)::float8 as open,
+      (array_agg(price order by timestamp_ms asc))[1]::float8 as open,
       max(price)::float8 as high,
       min(price)::float8 as low,
-      min(close)::float8 as close,
+      (array_agg(price order by timestamp_ms desc))[1]::float8 as close,
       sum(volume)::float8 as volume
     from ranked
     group by bucket
