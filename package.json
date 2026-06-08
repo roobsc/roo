@@ -1,0 +1,12 @@
+{
+  "name": "four-bsc-launchpad",
+  "private": true,
+  "version": "0.1.0",
+  "description": "BSC limited-purchase meme launchpad prototype",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ethers": "^6.13.5"
+  }
+}

@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>roo</title>
+    <link rel="icon" href="./assets/roo-avatar.jpg" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <div class="trade-ticker" aria-label="Latest trades">
+        <div id="tradeTickerTrack" class="trade-ticker-track"></div>
+      </div>
+
+      <header class="topbar">
+        <a class="brand" href="./index.html" aria-label="roo">
+          <span class="brand-mark" aria-hidden="true">
+            <img src="./assets/roo-avatar.jpg" alt="" />
+          </span>
+          <span>
+            <strong>roo</strong>
+            <small>BSC launchpad</small>
+          </span>
+        </a>
+
+        <nav class="tabs" aria-label="Main sections">
+          <button class="tab active" type="button" data-tab="market">市场</button>
+          <button class="tab" type="button" data-tab="create">创建</button>
+          <button class="tab" type="button" data-tab="treasury">金库</button>
+        </nav>
+
+        <div class="top-actions">
+          <button id="networkButton" class="network-chip" type="button">BSC</button>
+          <button id="connectButton" class="wallet-button" type="button">连接钱包</button>
+        </div>
+      </header>
+
+      <main>
+        <section id="marketPanel" class="panel-page active" aria-label="Market">
+          <div class="market-home">
+            <section class="market-hero roo-console">
+              <div class="roo-console-copy">
+                <span class="console-kicker">roo pouch exchange</span>
+                <h1>袋鼠仓里的公平发射</h1>
+                <p>BSC 限购内盘、满池发射、LP 黑洞。每个新项目先进入 roo 袋鼠仓，靠成交和曲线自己长出来。</p>
+              </div>
+
+              <div class="roo-search-hub">
+                <button class="create-frame" type="button" data-open-create>
+                  <span></span>
+                  创建代币
+                  <span></span>
+                </button>
+                <form id="marketSearchForm" class="market-search">
+                  <input id="marketSearch" type="search" placeholder="搜索名称 / 符号 / 合约地址" autocomplete="off" />
+                  <button type="submit">搜索</button>
+                </form>
+              </div>
+
+              <div class="roo-console-stats">
+                <div><span>固定总量</span><strong>10,000</strong></div>
+                <div><span>发射底池</span><strong>3-8 BNB</strong></div>
+                <div><span>限购范围</span><strong>1-100 枚</strong></div>
+              </div>
+            </section>
+
+            <section class="market-toolbar" aria-label="Market filters">
+              <label class="listed-toggle">
+                <input id="listedOnly" type="checkbox" />
+                <span></span>
+                已上线 Pancake Swap
+              </label>
+              <div class="filters" id="marketFilters">
+                <button class="filter active" type="button" data-market-filter="all">当前项目</button>
+                <button class="filter" type="button" data-market-filter="launching">即将发射</button>
+                <button class="filter" type="button" data-market-filter="new">新创建</button>
+                <button class="filter" type="button" data-market-filter="launched">已发射</button>
+              </div>
+              <div class="market-sort">
+                <button type="button" aria-label="按市值排序">市值排名</button>
+                <button type="button" aria-label="刷新项目">刷新</button>
+              </div>
+            </section>
+
+            <div class="project-list" id="projectList"></div>
+          </div>
+        </section>
+
+        <section id="createPanel" class="panel-page" aria-label="Create token">
+          <form id="createForm" class="creator-layout">
+            <section class="creator-main">
+              <div class="section-head">
+                <div>
+                  <span class="eyebrow">Create BSC Project</span>
+                  <h1>创建限购发射项目</h1>
+                </div>
+                <div class="header-actions">
+                  <button class="ghost-action" id="generateButton" type="submit">更新预览</button>
+                  <button class="primary-action" id="createTokenButton" type="button">创建代币</button>
+                </div>
+              </div>
+
+              <section class="media-section">
+                <div class="section-head compact">
+                  <h2>项目头像</h2>
+                  <span>支持 PNG / JPG / WEBP</span>
+                </div>
+                <div class="media-grid">
+                  <label class="avatar-uploader" for="avatarInput">
+                    <input id="avatarInput" type="file" accept="image/png,image/jpeg,image/webp" />
+                    <img id="avatarPreview" src="./assets/roo-avatar.jpg" alt="Avatar preview" />
+                    <span id="avatarHint">上传项目头像</span>
+                  </label>
+                  <div class="avatar-meta">
+                    <strong id="avatarFileName">未选择图片</strong>
+                    <p>创建项目时可以带上头像，预览卡片会同步展示。</p>
+                  </div>
+                </div>
+              </section>
+
+              <div class="form-grid">
+                <label class="field">
+                  <span>项目名称</span>
+                  <input id="tokenName" type="text" value="Meme Rocket" maxlength="32" />
+                </label>
+                <label class="field">
+                  <span>代币符号</span>
+                  <input id="tokenSymbol" type="text" value="MRKT" maxlength="12" />
+                </label>
+                <label class="field">
+                  <span>发射底池 BNB</span>
+                  <input id="launchThreshold" type="number" min="3" max="8" step="1" value="5" />
+                </label>
+              </div>
+
+              <section class="social-section">
+                <div class="section-head compact">
+                  <h2>社媒信息</h2>
+                  <span>创建页同步收集</span>
+                </div>
+                <div class="form-grid">
+                  <label class="field">
+                    <span>X</span>
+                    <input id="xLink" type="url" placeholder="https://x.com/yourproject" />
+                  </label>
+                  <label class="field">
+                    <span>TG</span>
+                    <input id="telegramLink" type="url" placeholder="https://t.me/yourproject" />
+                  </label>
+                  <label class="field full">
+                    <span>网站</span>
+                    <input id="websiteLink" type="url" placeholder="https://yourproject.site" />
+                  </label>
+                </div>
+              </section>
+
+              <section class="range-section">
+                <div class="section-head compact">
+                  <h2>单钱包限购</h2>
+                  <label class="switch-control">
+                    <input id="walletCapEnabled" type="checkbox" checked />
+                    <span class="switch-track"></span>
+                    <strong>启用限购</strong>
+                  </label>
+                </div>
+                <div id="walletCapSettings" class="cap-settings">
+                  <div class="section-head compact">
+                    <h2>限购阶梯</h2>
+                    <strong><span id="capValue">25</span> 枚 / 钱包</strong>
+                  </div>
+                  <label class="field tax-rate-input">
+                    <span>手动限购 1-100 枚</span>
+                    <input id="walletCap" type="number" min="1" max="100" step="1" value="25" />
+                  </label>
+                  <input id="walletCapSlider" class="slider" type="range" min="1" max="100" step="1" value="25" />
+                  <div class="step-pills" id="stepPills"></div>
+                </div>
+              </section>
+
+              <section class="range-section">
+                <div class="section-head compact">
+                  <h2>发射阈值</h2>
+                  <strong><span id="thresholdValue">5</span> BNB</strong>
+                </div>
+                <input id="thresholdSlider" class="slider" type="range" min="3" max="8" step="1" value="5" />
+                <div class="threshold-pills">
+                  <span>3 BNB</span>
+                  <span>4</span>
+                  <span>5</span>
+                  <span>6</span>
+                  <span>7</span>
+                  <span>8 BNB</span>
+                </div>
+              </section>
+
+              <section class="tax-panel">
+                <div class="section-head compact">
+                  <h2>项目税收</h2>
+                  <label class="switch-control">
+                    <input id="taxEnabled" type="checkbox" />
+                    <span class="switch-track"></span>
+                    <strong>启用税收</strong>
+                  </label>
+                </div>
+                <p class="tax-note">关闭时项目不收机制税；启用后可设置 1%-10% 税率，营销收 BNB，分红自动发给达到 1 枚的持币者，LP 回流自动进入项目池。</p>
+
+                <div id="taxSettings" class="tax-settings" hidden>
+                  <section class="wallet-section">
+                    <div class="section-head compact">
+                      <h2>营销钱包</h2>
+                      <span>启用税收后才需要填写；留空自动使用当前连接钱包</span>
+                    </div>
+                    <div class="form-grid">
+                      <label class="field full">
+                        <span>营销钱包（收 BNB）</span>
+                        <input id="fundWallet" type="text" placeholder="营销收款钱包地址 0x..." autocomplete="off" />
+                      </label>
+                    </div>
+                  </section>
+
+                  <div class="tax-rate-panel">
+                    <div class="section-head compact">
+                      <h2>税率</h2>
+                      <strong><span id="projectTaxValue">1</span>%</strong>
+                    </div>
+                    <div class="tax-rate-options">
+                      <button class="tax-rate-option active" type="button" data-tax-rate="1">1%</button>
+                      <button class="tax-rate-option" type="button" data-tax-rate="3">3%</button>
+                      <button class="tax-rate-option" type="button" data-tax-rate="5">5%</button>
+                      <button class="tax-rate-option" type="button" data-tax-rate="10">10%</button>
+                    </div>
+                    <label class="field tax-rate-input">
+                      <span>手动税率 1-10%</span>
+                      <input id="projectTaxRate" type="number" min="1" max="10" step="1" value="1" />
+                    </label>
+                  </div>
+
+                  <div class="section-head compact tax-allocation-head">
+                    <h2>税收分配</h2>
+                    <strong>总计：<span id="taxTotal">100</span>% 未分配：<span id="taxRemain">0</span>%</strong>
+                  </div>
+                  <div id="taxWarning" class="tax-warning">分配已满 100%。</div>
+
+                  <div class="tax-content">
+                    <div class="donut" aria-label="Tax allocation chart">
+                      <span id="donutValue">100%</span>
+                    </div>
+                    <div class="tax-sliders">
+                      <label class="tax-row">
+                        <span>营销钱包（营销、捐赠等，BNB）</span>
+                        <strong><span id="walletTaxValue">32</span>%</strong>
+                        <input id="walletTax" class="slider" type="range" min="0" max="100" value="32" />
+                      </label>
+                      <label class="tax-row">
+                        <span>销毁（减少供应量）</span>
+                        <strong><span id="burnTaxValue">34</span>%</strong>
+                        <input id="burnTax" class="slider" type="range" min="0" max="100" value="34" />
+                      </label>
+                      <label class="tax-row">
+                        <span>持币分红（>= 1 枚自动收 BNB）</span>
+                        <strong><span id="rewardTaxValue">21</span>%</strong>
+                        <input id="rewardTax" class="slider" type="range" min="0" max="100" value="21" />
+                      </label>
+                      <label class="tax-row">
+                        <span>回流 LP（BNB 自动进项目池）</span>
+                        <strong><span id="lpTaxValue">13</span>%</strong>
+                        <input id="lpTax" class="slider" type="range" min="0" max="100" value="13" />
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </section>
+
+            <aside class="preview-panel">
+              <div class="token-preview">
+                <img id="previewAvatar" class="preview-avatar" src="./assets/roo-avatar.jpg" alt="Project avatar preview" />
+                <div>
+                  <h2 id="previewName">Meme Rocket</h2>
+                  <p id="previewSymbol">MRKT / BSC</p>
+                </div>
+              </div>
+
+              <dl class="summary-list">
+                <div>
+                  <dt>总供应量</dt>
+                  <dd>10,000</dd>
+                </div>
+                <div>
+                  <dt>单钱包限购</dt>
+                  <dd id="summaryCap">25 枚</dd>
+                </div>
+                <div>
+                  <dt>发射底池</dt>
+                  <dd><span id="summaryThreshold">5</span> BNB</dd>
+                </div>
+                <div>
+                  <dt>X</dt>
+                  <dd id="summaryX">未填写</dd>
+                </div>
+                <div>
+                  <dt>TG</dt>
+                  <dd id="summaryTelegram">未填写</dd>
+                </div>
+                <div>
+                  <dt>网站</dt>
+                  <dd id="summaryWebsite">未填写</dd>
+                </div>
+                <div>
+                  <dt>LP 去向</dt>
+                  <dd>0x000...dEaD</dd>
+                </div>
+              </dl>
+
+              <div class="code-box" hidden>
+                <div class="section-head compact">
+                  <h2>创建参数</h2>
+                  <button id="copyParams" type="button">复制</button>
+                </div>
+                <pre id="paramsOutput"></pre>
+              </div>
+
+              <div class="launch-action-box">
+                <button class="primary-action action-wide" id="createTokenButtonSecondary" type="button">创建代币</button>
+                <p id="createStatus" class="create-status">点击后会连接钱包、调用发射台合约并提交创建交易。</p>
+              </div>
+            </aside>
+          </form>
+        </section>
+
+        <section id="treasuryPanel" class="panel-page" aria-label="Treasury">
+          <div class="treasury-layout">
+            <div class="section-head">
+              <div>
+                <span class="eyebrow">Treasury</span>
+                <h1>项目金库流向</h1>
+              </div>
+            </div>
+
+            <div class="flow-grid">
+              <article class="flow-card">
+                <span>内盘交易</span>
+                <h2>限购成交</h2>
+                <p>项目在内盘阶段按单钱包 1-100 枚限购成交，达到设定底池后再发射到 Pancake Swap。</p>
+              </article>
+              <article class="flow-card">
+                <span>项目税机制</span>
+                <h2>四路分配</h2>
+                <p>营销收 BNB；分红自动发给达到 1 枚的持币者；回流 LP 自动进入项目池；销毁用于减少供应量。</p>
+              </article>
+              <article class="flow-card">
+                <span>外盘发射</span>
+                <h2>LP 黑洞</h2>
+                <p>达到 3-8 BNB 的手动阈值后创建 Pancake 流动池，LP token 发送到黑洞。</p>
+              </article>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="tradeModal" class="trade-modal" hidden>
+      <div class="trade-backdrop" data-close-trade></div>
+      <section class="trade-dialog" role="dialog" aria-modal="true" aria-label="Token trading">
+        <button class="trade-close" type="button" data-close-trade aria-label="关闭交易">×</button>
+
+        <div class="trade-layout">
+          <section class="trade-main">
+            <div class="trade-token-head">
+              <div class="trade-token-id">
+                <div id="tradeAvatar" class="trade-avatar">r</div>
+                <div>
+                  <div class="trade-name-row">
+                    <h2 id="tradePair">roo / BNB</h2>
+                    <button type="button" aria-label="搜索合约">⌕</button>
+                  </div>
+                  <div class="contract-line">
+                    <button id="tradeContract" class="contract-copy" type="button">合约 0x000...0000</button>
+                    <button id="copyTradeContract" class="copy-contract-button" type="button">复制</button>
+                    <span id="tradeCreator">创建者 0x000...0000</span>
+                  </div>
+                </div>
+              </div>
+              <div class="trade-price-box">
+                <strong id="tradePrice">0.001 BNB</strong>
+                <span id="tradeChange">+0%</span>
+              </div>
+            </div>
+
+            <div class="trade-stats">
+              <div><span>市值</span><strong id="tradeMarketCap">$0</strong></div>
+              <div><span>虚拟流动性</span><strong id="tradeLiquidity">$0</strong></div>
+              <div><span>交易额</span><strong id="tradeVolume">$0</strong></div>
+              <div><span>创建时间</span><strong id="tradeCreated">刚刚</strong></div>
+            </div>
+
+            <div class="chart-toolbar">
+              <button class="active" type="button">1分</button>
+              <button type="button">5分</button>
+              <button type="button">15分</button>
+              <button type="button">1小时</button>
+              <button type="button">4小时</button>
+              <button type="button">天</button>
+              <span></span>
+              <button type="button">技术指标</button>
+              <button type="button">全屏</button>
+            </div>
+
+            <div class="roo-chart">
+              <div class="chart-tools">
+                <button type="button">＋</button>
+                <button type="button">╱</button>
+                <button type="button">≋</button>
+                <button type="button">⌁</button>
+                <button type="button">T</button>
+                <button type="button">☺</button>
+              </div>
+              <canvas id="tradeChart" width="980" height="360"></canvas>
+              <div class="chart-price-tag" id="chartPriceTag">0.001</div>
+            </div>
+
+            <div class="trade-tabs">
+              <button type="button">评论</button>
+              <button class="active" type="button">交易</button>
+            </div>
+            <div class="trade-table" id="tradeTable"></div>
+          </section>
+
+          <aside class="trade-side">
+            <section class="swap-panel">
+              <div class="swap-topline">
+                <label class="mev-toggle">
+                  MEV保护
+                  <input type="checkbox" />
+                  <span></span>
+                </label>
+                <button type="button">15%</button>
+              </div>
+
+              <div class="swap-tabs">
+                <button id="buyTab" class="active" type="button" data-swap-side="buy">购买</button>
+                <button id="sellTab" type="button" data-swap-side="sell">卖出</button>
+              </div>
+
+              <label class="swap-input">
+                <input id="swapAmount" type="number" min="0" step="0.01" value="0.1" />
+                <strong id="swapUnit">BNB</strong>
+                <button type="button" id="swapReverse">⇄</button>
+              </label>
+
+              <div class="quick-amounts">
+                <button type="button" data-amount="0.1">0.1 BNB</button>
+                <button type="button" data-amount="0.5">0.5 BNB</button>
+                <button type="button" data-amount="1">1 BNB</button>
+              </div>
+
+              <div class="sell-percentages" id="sellPercentages" hidden>
+                <button type="button" data-sell-percent="25">25%</button>
+                <button type="button" data-sell-percent="50">50%</button>
+                <button type="button" data-sell-percent="75">75%</button>
+                <button type="button" data-sell-percent="100">100%</button>
+              </div>
+
+              <p class="token-balance" id="tokenBalanceText">余额 0 代币</p>
+
+              <p class="swap-limit" id="swapLimit">最大限度 30 枚</p>
+              <button id="swapSubmit" class="swap-submit" type="button">购买</button>
+              <p class="swap-receive" id="swapReceive">您将收到: 0 roo</p>
+              <button class="route-button" type="button">法币购买 BNB ›</button>
+            </section>
+
+            <section class="bonding-panel">
+              <div class="bonding-head">
+                <h3>联合曲线进度</h3>
+                <strong id="bondingValue">0%</strong>
+              </div>
+              <div class="bonding-bar"><i id="bondingBar"></i></div>
+              <p id="bondingText">达到发射阈值后可进入 Pancake Swap。</p>
+            </section>
+
+            <section class="token-info-panel">
+              <div class="token-info-top">
+                <div id="infoAvatar" class="trade-avatar">r</div>
+                <div>
+                  <h3 id="infoName">roo</h3>
+                  <span class="badge">Meme</span>
+                  <p id="infoSymbol">ROO</p>
+                </div>
+              </div>
+              <p id="infoDescription">使用 roo 的暖色交易面板查看内盘走势、买卖和发射进度。</p>
+            </section>
+          </aside>
+        </div>
+      </section>
+    </div>
+
+    <script src="./config.js"></script>
+    <script src="./node_modules/ethers/dist/ethers.umd.min.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>

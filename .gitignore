@@ -1,0 +1,16 @@
+node_modules/
+build/
+build-check/
+build-check-final/
+build-optimized/
+*.log
+server-*.cmd.log
+server-*.out.log
+server-*.err.log
+.env
+.env.*
+!.env.example
+.vercel/
+dist/
+coverage/
+tmp/
