@@ -30,9 +30,9 @@
         </a>
 
         <nav class="tabs" aria-label="Main sections">
-          <button class="tab active" type="button" data-tab="market">市场</button>
-          <button class="tab" type="button" data-tab="create">创建</button>
-          <button class="tab" type="button" data-tab="treasury">金库</button>
+          <button class="tab active" type="button" data-tab="market" data-i18n="tabMarket">市场</button>
+          <button class="tab" type="button" data-tab="create" data-i18n="tabCreate">创建</button>
+          <button class="tab" type="button" data-tab="treasury" data-i18n="tabTreasury">金库</button>
         </nav>
 
         <div class="top-actions">
@@ -50,27 +50,27 @@
           <div class="market-home">
             <section class="market-hero roo-console">
               <div class="roo-console-copy">
-                <span class="console-kicker">roo pouch exchange</span>
-                <h1>袋鼠仓里的公平发射</h1>
-                <p>BSC 限购内盘、满池发射、LP 黑洞。每个新项目先进入 roo 袋鼠仓，靠成交和曲线自己长出来。</p>
+                <span class="console-kicker" data-i18n="heroKicker">roo pouch exchange</span>
+                <h1 data-i18n="heroTitle">袋鼠仓里的公平发射</h1>
+                <p data-i18n="heroCopy">BSC 限购内盘、满池发射、LP 黑洞。每个新项目先进入 roo 袋鼠仓，靠成交和曲线自己长出来。</p>
               </div>
 
               <div class="roo-search-hub">
                 <button class="create-frame" type="button" data-open-create>
-                  <span></span>
-                  创建代币
-                  <span></span>
+                  <span class="create-frame-nut"></span>
+                  <strong data-i18n="createToken">创建代币</strong>
+                  <span class="create-frame-nut"></span>
                 </button>
                 <form id="marketSearchForm" class="market-search">
-                  <input id="marketSearch" type="search" placeholder="搜索名称 / 符号 / 合约地址" autocomplete="off" />
-                  <button type="submit">搜索</button>
+                  <input id="marketSearch" type="search" placeholder="搜索名称 / 符号 / 合约地址" data-i18n-placeholder="searchPlaceholder" autocomplete="off" />
+                  <button type="submit" data-i18n="search">搜索</button>
                 </form>
               </div>
 
               <div class="roo-console-stats">
-                <div><span>固定总量</span><strong>10,000</strong></div>
-                <div><span>发射底池</span><strong>3-8 BNB</strong></div>
-                <div><span>限购范围</span><strong>1-100 枚</strong></div>
+                <div><span data-i18n="totalSupply">固定总量</span><strong>10,000</strong></div>
+                <div><span data-i18n="launchPool">发射底池</span><strong>3-8 BNB</strong></div>
+                <div><span data-i18n="buyLimitRange">限购范围</span><strong>1-100 枚</strong></div>
               </div>
             </section>
 
@@ -78,13 +78,13 @@
               <label class="listed-toggle">
                 <input id="listedOnly" type="checkbox" />
                 <span></span>
-                已上线 Pancake Swap
+                <span data-i18n="listedOnly">已上线 Pancake Swap</span>
               </label>
               <div class="filters" id="marketFilters">
-                <button class="filter active" type="button" data-market-filter="all">当前项目</button>
-                <button class="filter" type="button" data-market-filter="launching">即将发射</button>
-                <button class="filter" type="button" data-market-filter="new">新创建</button>
-                <button class="filter" type="button" data-market-filter="launched">已发射</button>
+                <button class="filter active" type="button" data-market-filter="all" data-i18n="filterAll">当前项目</button>
+                <button class="filter" type="button" data-market-filter="launching" data-i18n="filterLaunching">即将发射</button>
+                <button class="filter" type="button" data-market-filter="new" data-i18n="filterNew">新创建</button>
+                <button class="filter" type="button" data-market-filter="launched" data-i18n="filterLaunched">已发射</button>
               </div>
               <div class="market-extra-filters" aria-label="Project filters">
                 <select id="hardCapFilter" aria-label="Hard cap filter">
@@ -103,8 +103,8 @@
                 </select>
               </div>
               <div class="market-sort">
-                <button id="marketCapSortButton" type="button" aria-label="按市值排序">市值排名</button>
-                <button id="refreshProjectsButton" type="button" aria-label="刷新项目">刷新</button>
+                <button id="marketCapSortButton" type="button" aria-label="按市值排序" data-i18n="marketCapRank">市值排名</button>
+                <button id="refreshProjectsButton" type="button" aria-label="刷新项目" data-i18n="refresh">刷新</button>
               </div>
             </section>
 
@@ -387,28 +387,28 @@
           <div class="profile-layout">
             <div class="section-head">
               <div>
-                <span class="eyebrow">Profile</span>
-                <h1>个人资料</h1>
+                <span class="eyebrow" data-i18n="profileEyebrow">Profile</span>
+                <h1 data-i18n="profileTitle">个人资料</h1>
               </div>
               <button id="profileConnectButton" class="primary-action" type="button">连接钱包</button>
             </div>
             <div class="profile-summary">
-              <div><span>钱包</span><strong id="profileWallet">未连接</strong></div>
-              <div><span>创建项目</span><strong id="profileCreatedCount">0</strong></div>
-              <div><span>交易代币</span><strong id="profileTradedCount">0</strong></div>
-              <div><span>当前持仓</span><strong id="profileHoldingCount">0</strong></div>
+              <div><span data-i18n="profileWalletLabel">钱包</span><strong id="profileWallet">未连接</strong></div>
+              <div><span data-i18n="profileCreatedLabel">创建项目</span><strong id="profileCreatedCount">0</strong></div>
+              <div><span data-i18n="profileTradedLabel">交易代币</span><strong id="profileTradedCount">0</strong></div>
+              <div><span data-i18n="profileHoldingLabel">当前持仓</span><strong id="profileHoldingCount">0</strong></div>
             </div>
             <div class="profile-grid">
               <section class="profile-card">
-                <h2>我创建的代币</h2>
+                <h2 data-i18n="profileCreatedTitle">我创建的代币</h2>
                 <div id="createdTokenList" class="profile-list"></div>
               </section>
               <section class="profile-card">
-                <h2>我交易过的代币</h2>
+                <h2 data-i18n="profileTradedTitle">我交易过的代币</h2>
                 <div id="tradedTokenList" class="profile-list"></div>
               </section>
               <section class="profile-card">
-                <h2>我的持仓</h2>
+                <h2 data-i18n="profileHoldingTitle">我的持仓</h2>
                 <div id="holdingTokenList" class="profile-list"></div>
               </section>
             </div>
@@ -420,25 +420,25 @@
             <div class="section-head">
               <div>
                 <span class="eyebrow">FAQ</span>
-                <h1>常见问题</h1>
+                <h1 data-i18n="faqTitle">常见问题</h1>
               </div>
             </div>
             <div class="faq-list">
               <details open>
-                <summary>什么是内盘发射？</summary>
-                <p>项目先在 roo 内盘完成限购交易和底池积累，达到设置的 BNB 阈值后再发射到 Pancake Swap。</p>
+                <summary data-i18n="faqInternalQuestion">什么是内盘发射？</summary>
+                <p data-i18n="faqInternalAnswer">项目先在 roo 内盘完成限购交易和底池积累，达到设置的 BNB 阈值后再发射到 Pancake Swap。</p>
               </details>
               <details>
-                <summary>什么是已发射项目？</summary>
-                <p>已发射表示发射台合约记录该项目已经迁移到 Pancake Swap，外盘 LP 会进入黑洞地址。</p>
+                <summary data-i18n="faqLaunchedQuestion">什么是已发射项目？</summary>
+                <p data-i18n="faqLaunchedAnswer">已发射表示发射台合约记录该项目已经迁移到 Pancake Swap，外盘 LP 会进入黑洞地址。</p>
               </details>
               <details>
-                <summary>头像和 K 线数据存在哪里？</summary>
-                <p>头像保存在 Vercel Blob，项目、交易和 K 线原始成交记录保存在 Neon/Postgres。</p>
+                <summary data-i18n="faqStorageQuestion">头像和 K 线数据存在哪里？</summary>
+                <p data-i18n="faqStorageAnswer">头像保存在 Vercel Blob，项目、交易和 K 线原始成交记录保存在 Neon/Postgres。</p>
               </details>
               <details>
-                <summary>什么是审计代币？</summary>
-                <p>审计代币通常指合约代码经过第三方安全检查的代币。roo 页面展示不等于审计背书，用户仍需自行判断风险。</p>
+                <summary data-i18n="faqAuditQuestion">什么是审计代币？</summary>
+                <p data-i18n="faqAuditAnswer">审计代币通常指合约代码经过第三方安全检查的代币。roo 页面展示不等于审计背书，用户仍需自行判断风险。</p>
               </details>
             </div>
           </div>
@@ -454,10 +454,10 @@
           <strong>roo</strong>
           <button type="button" data-close-menu aria-label="Close menu">×</button>
         </div>
-        <button type="button" data-drawer-tab="market">Launchpad</button>
-        <button type="button" data-drawer-tab="create">Create Token</button>
-        <button type="button" data-drawer-tab="treasury">Treasury</button>
-        <button type="button" data-drawer-tab="profile">Profile</button>
+        <button type="button" data-drawer-tab="market" data-i18n="drawerMarket">发射台</button>
+        <button type="button" data-drawer-tab="create" data-i18n="drawerCreate">创建代币</button>
+        <button type="button" data-drawer-tab="treasury" data-i18n="drawerTreasury">金库</button>
+        <button type="button" data-drawer-tab="profile" data-i18n="drawerProfile">个人资料</button>
         <button type="button" data-drawer-tab="faq">FAQ</button>
       </aside>
     </div>

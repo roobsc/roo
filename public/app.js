@@ -670,19 +670,19 @@ function renderProjects() {
         </div>
         <dl class="project-facts">
           <div>
-            <dt>创建者:</dt>
+            <dt>${t("creatorLabel")}:</dt>
             <dd>${project.creator}</dd>
           </div>
           <div>
-            <dt>市值:</dt>
+            <dt>${t("marketCapLabel")}:</dt>
             <dd>${formatMarketCap(project.marketCap)}</dd>
           </div>
           <div>
-            <dt>限购:</dt>
+            <dt>${t("walletCapLabel")}:</dt>
             <dd>${project.cap} 枚</dd>
           </div>
           <div>
-            <dt>持有人:</dt>
+            <dt>${t("holdersLabel")}:</dt>
             <dd>${project.holders}</dd>
           </div>
         </dl>
@@ -692,7 +692,7 @@ function renderProjects() {
         </div>
         <div class="project-card-footer">
           <span class="badge">${project.status}</span>
-          <span>底池 ${project.raised}</span>
+          <span>${t("poolLabel")} ${project.raised}</span>
         </div>
       </div>
     </article>
@@ -715,13 +715,30 @@ function renderProfileList(selector, items, emptyText) {
         <strong>${project.name}</strong>
         <small>${project.symbol} · ${project.raised || "--"}</small>
       </span>
-      <b>${project.listed ? "Listed" : "Internal"}</b>
+      <b>${project.listed ? t("statusListed") : t("statusInternal")}</b>
     </button>
   `).join("");
 }
 
 const translations = {
   zh: {
+    tabMarket: "市场",
+    tabCreate: "创建",
+    tabTreasury: "金库",
+    heroKicker: "roo pouch exchange",
+    heroTitle: "袋鼠仓里的公平发射",
+    heroCopy: "BSC 限购内盘、满池发射、LP 黑洞。每个新项目先进入 roo 袋鼠仓，靠成交和曲线自己长出来。",
+    createToken: "创建代币",
+    searchPlaceholder: "搜索名称 / 符号 / 合约地址",
+    search: "搜索",
+    totalSupply: "固定总量",
+    launchPool: "发射底池",
+    buyLimitRange: "限购范围",
+    listedOnly: "已上线 Pancake Swap",
+    filterAll: "当前项目",
+    filterLaunching: "即将发射",
+    filterNew: "新创建",
+    filterLaunched: "已发射",
     filterHardCapAll: "硬顶",
     sortDefault: "默认推荐",
     sortMarketCap: "市值",
@@ -729,10 +746,68 @@ const translations = {
     sortStartTime: "开始时间",
     sortEndTime: "接近结束",
     sortHot: "热度",
+    marketCapRank: "市值排名",
+    refresh: "刷新",
+    syncing: "同步中...",
+    connectWallet: "连接钱包",
+    walletMissing: "未检测到钱包",
+    walletNotConnected: "未连接",
+    profileEyebrow: "Profile",
+    profileTitle: "个人资料",
+    profileWalletLabel: "钱包",
+    profileCreatedLabel: "创建项目",
+    profileTradedLabel: "交易代币",
+    profileHoldingLabel: "当前持仓",
+    profileCreatedTitle: "我创建的代币",
+    profileTradedTitle: "我交易过的代币",
+    profileHoldingTitle: "我的持仓",
+    profileCreatedConnectEmpty: "连接钱包后显示你创建的代币。",
+    profileTradedConnectEmpty: "连接钱包后显示你交易过的代币。",
+    profileHoldingConnectEmpty: "连接钱包后显示你的持仓。",
+    profileCreatedEmpty: "还没有创建过代币。",
+    profileTradedEmpty: "还没有真实交易记录。",
+    profileHoldingEmpty: "没有读取到持仓。",
+    drawerMarket: "发射台",
+    drawerCreate: "创建代币",
+    drawerTreasury: "金库",
+    drawerProfile: "个人资料",
+    faqTitle: "常见问题",
+    faqInternalQuestion: "什么是内盘发射？",
+    faqInternalAnswer: "项目先在 roo 内盘完成限购交易和底池积累，达到设置的 BNB 阈值后再发射到 Pancake Swap。",
+    faqLaunchedQuestion: "什么是已发射项目？",
+    faqLaunchedAnswer: "已发射表示发射台合约记录该项目已经迁移到 Pancake Swap，外盘 LP 会进入黑洞地址。",
+    faqStorageQuestion: "头像和 K 线数据存在哪里？",
+    faqStorageAnswer: "头像保存在 Vercel Blob，项目、交易和 K 线原始成交记录保存在 Neon/Postgres。",
+    faqAuditQuestion: "什么是审计代币？",
+    faqAuditAnswer: "审计代币通常指合约代码经过第三方安全检查的代币。roo 页面展示不等于审计背书，用户仍需自行判断风险。",
+    creatorLabel: "创建者",
+    marketCapLabel: "市值",
+    walletCapLabel: "限购",
+    holdersLabel: "持有人",
+    poolLabel: "底池",
+    statusListed: "已上线",
+    statusInternal: "内盘",
     loadingProjects: "Loading microsales...",
     emptyProjects: "暂无真实项目。请创建项目，或点击刷新同步链上历史项目。"
   },
   en: {
+    tabMarket: "Market",
+    tabCreate: "Create",
+    tabTreasury: "Treasury",
+    heroKicker: "roo pouch exchange",
+    heroTitle: "Fair launches from the roo pouch",
+    heroCopy: "BSC limited-buy bonding, pool-triggered launch, and burned LP. Every project starts inside roo and grows through real trades.",
+    createToken: "Create Token",
+    searchPlaceholder: "Search name / symbol / contract",
+    search: "Search",
+    totalSupply: "Total supply",
+    launchPool: "Launch pool",
+    buyLimitRange: "Buy limit",
+    listedOnly: "Listed on Pancake Swap",
+    filterAll: "All projects",
+    filterLaunching: "Launching soon",
+    filterNew: "New",
+    filterLaunched: "Launched",
     filterHardCapAll: "Hard cap",
     sortDefault: "Default",
     sortMarketCap: "Market cap",
@@ -740,6 +815,47 @@ const translations = {
     sortStartTime: "Start time",
     sortEndTime: "End time",
     sortHot: "Hot",
+    marketCapRank: "Market cap rank",
+    refresh: "Refresh",
+    syncing: "Syncing...",
+    connectWallet: "Connect Wallet",
+    walletMissing: "Wallet not found",
+    walletNotConnected: "Not connected",
+    profileEyebrow: "Profile",
+    profileTitle: "Profile",
+    profileWalletLabel: "Wallet",
+    profileCreatedLabel: "Created",
+    profileTradedLabel: "Traded tokens",
+    profileHoldingLabel: "Holdings",
+    profileCreatedTitle: "Created tokens",
+    profileTradedTitle: "Traded tokens",
+    profileHoldingTitle: "Holdings",
+    profileCreatedConnectEmpty: "Connect your wallet to see tokens you created.",
+    profileTradedConnectEmpty: "Connect your wallet to see tokens you traded.",
+    profileHoldingConnectEmpty: "Connect your wallet to see your holdings.",
+    profileCreatedEmpty: "No created tokens yet.",
+    profileTradedEmpty: "No real trade records yet.",
+    profileHoldingEmpty: "No holdings found.",
+    drawerMarket: "Launchpad",
+    drawerCreate: "Create Token",
+    drawerTreasury: "Treasury",
+    drawerProfile: "Profile",
+    faqTitle: "FAQ",
+    faqInternalQuestion: "What is an internal launch?",
+    faqInternalAnswer: "A project first trades inside roo with wallet limits and pool growth, then launches to Pancake Swap after reaching its BNB threshold.",
+    faqLaunchedQuestion: "What is a launched project?",
+    faqLaunchedAnswer: "Launched means the launchpad contract records that the project migrated to Pancake Swap and external LP went to the burn address.",
+    faqStorageQuestion: "Where are avatars and chart data stored?",
+    faqStorageAnswer: "Avatars are stored in Vercel Blob. Projects, trades, and candle source records are stored in Neon/Postgres.",
+    faqAuditQuestion: "What is an audited token?",
+    faqAuditAnswer: "An audited token usually means the contract code was reviewed by a third party. roo display is not an audit endorsement, so users still need to judge risk.",
+    creatorLabel: "Creator",
+    marketCapLabel: "Market cap",
+    walletCapLabel: "Limit",
+    holdersLabel: "Holders",
+    poolLabel: "Pool",
+    statusListed: "Listed",
+    statusInternal: "Internal",
     loadingProjects: "Loading microsales...",
     emptyProjects: "No real projects yet. Create one or refresh to sync chain history."
   }
@@ -753,14 +869,14 @@ function t(key) {
 
 async function refreshProfile() {
   const wallet = normalizeAddress(state.wallet);
-  $("#profileWallet").textContent = wallet ? shortAddress(state.wallet) : "未连接";
+  $("#profileWallet").textContent = wallet ? shortAddress(state.wallet) : t("walletNotConnected");
   if (!wallet) {
     $("#profileCreatedCount").textContent = "0";
     $("#profileTradedCount").textContent = "0";
     $("#profileHoldingCount").textContent = "0";
-    renderProfileList("#createdTokenList", [], "连接钱包后显示你创建的代币。");
-    renderProfileList("#tradedTokenList", [], "连接钱包后显示你交易过的代币。");
-    renderProfileList("#holdingTokenList", [], "连接钱包后显示你的持仓。");
+    renderProfileList("#createdTokenList", [], t("profileCreatedConnectEmpty"));
+    renderProfileList("#tradedTokenList", [], t("profileTradedConnectEmpty"));
+    renderProfileList("#holdingTokenList", [], t("profileHoldingConnectEmpty"));
     return;
   }
 
@@ -807,9 +923,9 @@ async function refreshProfile() {
   $("#profileCreatedCount").textContent = String(created.length);
   $("#profileTradedCount").textContent = String(traded.length);
   $("#profileHoldingCount").textContent = String(holdings.length);
-  renderProfileList("#createdTokenList", created, "还没有创建过代币。");
-  renderProfileList("#tradedTokenList", traded, "还没有真实交易记录。");
-  renderProfileList("#holdingTokenList", holdings, "没有读取到持仓。");
+  renderProfileList("#createdTokenList", created, t("profileCreatedEmpty"));
+  renderProfileList("#tradedTokenList", traded, t("profileTradedEmpty"));
+  renderProfileList("#holdingTokenList", holdings, t("profileHoldingEmpty"));
 }
 
 function openMenu() {
@@ -831,8 +947,19 @@ function setLanguage(lang) {
   $$("[data-i18n]").forEach((element) => {
     element.textContent = t(element.dataset.i18n);
   });
+  $$("[data-i18n-placeholder]").forEach((element) => {
+    element.placeholder = t(element.dataset.i18nPlaceholder);
+  });
+  if (!state.wallet) {
+    $("#connectButton").textContent = t("connectWallet");
+    $("#profileConnectButton").textContent = t("connectWallet");
+    $("#profileWallet").textContent = t("walletNotConnected");
+  }
   if ($("#projectList")) {
     renderProjects();
+  }
+  if ($("#profilePanel").classList.contains("active")) {
+    refreshProfile();
   }
 }
 
@@ -1429,7 +1556,7 @@ function renderParams(fallbackWallet = "") {
 
 async function connectWallet() {
   if (!window.ethereum) {
-    $("#connectButton").textContent = "未检测到钱包";
+    $("#connectButton").textContent = t("walletMissing");
     throw new Error("未检测到钱包，请安装 MetaMask 或 OKX Wallet。");
   }
 
@@ -1708,7 +1835,7 @@ function bindEvents() {
     const button = $("#refreshProjectsButton");
     button.disabled = true;
     const previousText = button.textContent;
-    button.textContent = "同步中...";
+    button.textContent = t("syncing");
     try {
       await loadBackendProjects();
       await syncChainProjects();
@@ -1948,6 +2075,7 @@ function boot() {
   updateTaxState();
   updateCreateState();
   bindEvents();
+  setLanguage(state.language);
 }
 
 boot();

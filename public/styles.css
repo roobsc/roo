@@ -422,7 +422,7 @@ button {
   box-shadow: 0 16px 36px rgba(210, 125, 58, 0.22);
 }
 
-.create-frame span {
+.create-frame-nut {
   width: 44px;
   height: 36px;
   border: 1px solid rgba(19, 9, 5, 0.35);
@@ -433,7 +433,7 @@ button {
   transform: rotate(-18deg);
 }
 
-.create-frame span:last-child {
+.create-frame-nut:last-child {
   transform: rotate(18deg) scaleX(-1);
 }
 
