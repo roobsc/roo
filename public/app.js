@@ -832,6 +832,7 @@ const translations = {
     createConnectStatus: "正在连接钱包并检查 BSC 网络...",
     createReadVanityStatus: "正在读取发射台合约规则...",
     createGenerateAddressStatus: "正在生成合约代币地址...",
+    launchpadOutdatedError: "当前 config.js 里的发射台合约不是最新版，不支持自动生成 0000 后缀代币地址。请先用当前代码重新部署新版发射台合约，然后把新合约地址填到 config.js 的 launchpadAddress。",
     createVerifyAddressStatus: "已找到候选地址：{address}，正在链上校验合约代币地址...",
     createConfirmTxStatus: "链上确认预测地址：{address}，正在唤起钱包确认创建交易。",
     createSubmittedStatus: "交易已提交：{hash}，正在等待链上确认...",
@@ -979,6 +980,7 @@ const translations = {
     createConnectStatus: "Connecting wallet and checking BSC network...",
     createReadVanityStatus: "Reading launchpad contract rules...",
     createGenerateAddressStatus: "Generating token contract address...",
+    launchpadOutdatedError: "The launchpad contract in config.js is not the latest version and does not support automatic 0000-suffix token address generation. Deploy the current launchpad contract and update config.js launchpadAddress.",
     createVerifyAddressStatus: "Candidate address found: {address}. Verifying token contract address on-chain...",
     createConfirmTxStatus: "On-chain predicted address confirmed: {address}. Opening wallet confirmation...",
     createSubmittedStatus: "Transaction submitted: {hash}. Waiting for confirmation...",
@@ -1936,7 +1938,12 @@ async function handleCreateToken() {
     const launchpad = new ethers.Contract(config.launchpadAddress, LAUNCHPAD_ABI, signer);
     const launchThresholdArgument = await getLaunchThresholdArgument(launchpad, params.launchThresholdBnb);
     setCreateStatus(t("createReadVanityStatus"), "");
-    const initCodeHash = await launchpad.launchpadTokenInitCodeHash(params.name, params.symbol);
+    let initCodeHash = "";
+    try {
+      initCodeHash = await launchpad.launchpadTokenInitCodeHash(params.name, params.symbol);
+    } catch {
+      throw new Error(t("launchpadOutdatedError"));
+    }
     setCreateStatus(t("createGenerateAddressStatus"), "");
     const vanity = await findVanitySalt(params, wallet, initCodeHash);
     setCreateStatus(t("createVerifyAddressStatus").replace("{address}", vanity.predicted), "");
@@ -2031,6 +2038,24 @@ function handleAvatarChange(event) {
 }
 
 function bindEvents() {
+  const hero = $(".roo-console");
+  if (hero) {
+    hero.addEventListener("pointermove", (event) => {
+      if (window.matchMedia("(max-width: 760px)").matches) {
+        return;
+      }
+      const rect = hero.getBoundingClientRect();
+      const x = ((event.clientX - rect.left) / rect.width - 0.5) * 18;
+      const y = ((event.clientY - rect.top) / rect.height - 0.5) * 14;
+      hero.style.setProperty("--roo-parallax-x", `${x.toFixed(2)}px`);
+      hero.style.setProperty("--roo-parallax-y", `${y.toFixed(2)}px`);
+    });
+    hero.addEventListener("pointerleave", () => {
+      hero.style.setProperty("--roo-parallax-x", "0px");
+      hero.style.setProperty("--roo-parallax-y", "0px");
+    });
+  }
+
   $$(".tab").forEach((tab) => {
     tab.addEventListener("click", () => updateTabs(tab.dataset.tab));
   });

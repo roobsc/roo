@@ -559,6 +559,61 @@ select {
   pointer-events: none;
 }
 
+.kangaroo-silhouette {
+  position: absolute;
+  top: -56px;
+  right: -92px;
+  z-index: 0;
+  width: min(44vw, 560px);
+  min-width: 420px;
+  aspect-ratio: 1.24;
+  transform: translate3d(var(--roo-parallax-x, 0px), var(--roo-parallax-y, 0px), 0) rotate(-4deg);
+  opacity: 0.78;
+  pointer-events: none;
+  transition: transform 0.18s ease-out;
+}
+
+.kangaroo-glow {
+  position: absolute;
+  inset: 12% 4% 2% 12%;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 42% 38%, rgba(0, 240, 255, 0.24), transparent 44%),
+    radial-gradient(circle at 66% 58%, rgba(177, 0, 255, 0.2), transparent 48%);
+  filter: blur(22px);
+  opacity: 0.85;
+}
+
+.kangaroo-silhouette svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  fill: none;
+  stroke: rgba(0, 240, 255, 0.36);
+  stroke-width: 8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 10px rgba(0, 240, 255, 0.34)) drop-shadow(0 0 24px rgba(177, 0, 255, 0.2));
+}
+
+.kangaroo-copy {
+  position: absolute;
+  right: 116px;
+  bottom: 62px;
+  display: grid;
+  gap: 7px;
+  transform: rotate(-18deg);
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 13px;
+  font-weight: 300;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  text-align: right;
+  text-shadow: 0 0 14px rgba(0, 240, 255, 0.18);
+}
+
 .roo-console-copy,
 .roo-search-hub,
 .roo-console-stats {
@@ -2496,6 +2551,14 @@ select {
     transform: none;
   }
 
+  .kangaroo-silhouette {
+    top: -34px;
+    right: -120px;
+    width: 500px;
+    min-width: 360px;
+    opacity: 0.52;
+  }
+
   .roo-search-hub {
     border-left: 0;
     border-top: 1px solid rgba(0, 240, 255, 0.14);
@@ -2648,6 +2711,18 @@ select {
 
   .roo-console {
     padding: 12px;
+  }
+
+  .kangaroo-silhouette {
+    top: -30px;
+    right: -180px;
+    width: 430px;
+    min-width: 0;
+    opacity: 0.28;
+  }
+
+  .kangaroo-copy {
+    display: none;
   }
 
   .roo-console-copy {
