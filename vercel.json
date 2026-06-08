@@ -6,20 +6,14 @@
       "use": "@vercel/node"
     }
   ],
-  "functions": {
-    "server.js": {
-      "includeFiles": [
-        "index.html",
-        "styles.css",
-        "app.js",
-        "config.js",
-        "assets/**",
-        "contracts/**",
-        "build-vanity/**"
-      ]
-    }
-  },
   "routes": [
+    {
+      "handle": "filesystem"
+    },
+    {
+      "src": "/api/(.*)",
+      "dest": "server.js"
+    },
     {
       "src": "/(.*)",
       "dest": "server.js"
