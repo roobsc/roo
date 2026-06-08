@@ -292,157 +292,7 @@ const state = {
   }
 };
 
-const demoProjects = [
-  {
-    name: "NEO NEO",
-    symbol: "NEO",
-    status: "已发射",
-    stage: "launched",
-    progress: 100,
-    cap: 30,
-    raised: "5.0 / 5 BNB",
-    holders: 512,
-    marketCap: 55100,
-    creator: "0xb89c70b6ca0",
-    contract: "0x2e00000000000000000000000000000000ea4444",
-    change: 59.2,
-    listed: true,
-    avatar: "N"
-  },
-  {
-    name: "阿格尼",
-    symbol: "AGNI",
-    status: "即将发射",
-    stage: "launching",
-    progress: 93,
-    cap: 20,
-    raised: "6.5 / 7 BNB",
-    holders: 291,
-    marketCap: 85900,
-    creator: "0x7b1a7fb22b",
-    contract: "0x7b1000000000000000000000000000007fb22b",
-    change: 148.2,
-    listed: false,
-    avatar: "阿"
-  },
-  {
-    name: "不要回答",
-    symbol: "ASK",
-    status: "已发射",
-    stage: "launched",
-    progress: 100,
-    cap: 50,
-    raised: "8 / 8 BNB",
-    holders: 820,
-    marketCap: 192800,
-    creator: "0x99e58cd22",
-    contract: "0x9900000000000000000000000000000058cd22",
-    change: 457,
-    listed: true,
-    avatar: "不"
-  },
-  {
-    name: "咔力咔力",
-    symbol: "KALI",
-    status: "内盘",
-    stage: "new",
-    progress: 71.75,
-    cap: 25,
-    raised: "4.3 / 6 BNB",
-    holders: 206,
-    marketCap: 159700,
-    creator: "0x7b7fb22b",
-    contract: "0x7b7000000000000000000000000000007fb22b",
-    change: 361.5,
-    listed: false,
-    avatar: "咔"
-  },
-  {
-    name: "苹果",
-    symbol: "APPLE",
-    status: "新创建",
-    stage: "new",
-    progress: 14.08,
-    cap: 100,
-    raised: "0.7 / 5 BNB",
-    holders: 64,
-    marketCap: 43200,
-    creator: "0x7fa14e77",
-    contract: "0x7fa0000000000000000000000000000014e77",
-    change: 24.8,
-    listed: false,
-    avatar: "苹"
-  },
-  {
-    name: "迷因股",
-    symbol: "MEME",
-    status: "已发射",
-    stage: "launched",
-    progress: 100,
-    cap: 75,
-    raised: "8 / 8 BNB",
-    holders: 1094,
-    marketCap: 170800,
-    creator: "0x8427d182",
-    contract: "0x8420000000000000000000000000000027d182",
-    change: 393.6,
-    listed: true,
-    avatar: "迷"
-  },
-  {
-    name: "币股人生",
-    symbol: "LIFE",
-    status: "内盘",
-    stage: "new",
-    progress: 27.84,
-    cap: 40,
-    raised: "1.4 / 5 BNB",
-    holders: 118,
-    marketCap: 70600,
-    creator: "0x34c01886",
-    contract: "0x34c0000000000000000000000000000001886",
-    change: 94.7,
-    listed: false,
-    avatar: "币"
-  },
-  {
-    name: "点点",
-    symbol: "DOT",
-    status: "即将发射",
-    stage: "launching",
-    progress: 88.3,
-    cap: 15,
-    raised: "6.2 / 7 BNB",
-    holders: 377,
-    marketCap: 133400,
-    creator: "0x2187a1c0",
-    contract: "0x218000000000000000000000000000087a1c0",
-    change: 118.9,
-    listed: false,
-    avatar: "点"
-  },
-  {
-    name: "TRUMP PUMP",
-    symbol: "TRUMP",
-    status: "已发射",
-    stage: "launched",
-    progress: 100,
-    cap: 60,
-    raised: "7 / 7 BNB",
-    holders: 733,
-    marketCap: 118600,
-    creator: "0xdaad0745",
-    contract: "0xdaa00000000000000000000000000000d0745",
-    change: 208.4,
-    listed: true,
-    avatar: "T"
-  }
-];
-
-let projects = [...demoProjects];
-projects.forEach((project) => {
-  project.avatarUrl = project.avatarUrl || defaultAvatar;
-});
+let projects = [];
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -517,12 +367,12 @@ async function apiPost(path, data) {
 
 function mergeProjects(realProjects) {
   const byKey = new Map();
-  [...realProjects, ...demoProjects].forEach((project) => {
+  realProjects.forEach((project) => {
     const key = project.projectId !== undefined && project.projectId !== null
       ? `id:${project.projectId}`
       : `symbol:${project.symbol}`;
     if (!byKey.has(key)) {
-      byKey.set(key, project);
+      byKey.set(key, { ...project, avatarUrl: project.avatarUrl || defaultAvatar });
     }
   });
   projects = Array.from(byKey.values());
@@ -535,7 +385,7 @@ async function loadBackendProjects() {
     renderTradeTicker();
     renderProjects();
   } catch {
-    projects = [...demoProjects];
+    projects = [];
   }
 }
 
@@ -731,15 +581,16 @@ function getVisibleProjects() {
 function renderTradeTicker() {
   const items = projects
     .slice()
-    .sort((a, b) => b.change - a.change)
+    .filter((project) => Number(project.marketCap || 0) > 0 || Number(project.progress || 0) > 0)
+    .sort((a, b) => b.marketCap - a.marketCap)
     .map((project, index) => `
       <span class="trade-chip chip-${index % 6}">
         <b>${project.creator}</b>
-        购买 ${(0.18 + index * 0.07).toFixed(2)} BNB
+        底池 ${project.raised || "--"}
         <strong>${project.symbol}</strong>
       </span>
     `);
-  $("#tradeTickerTrack").innerHTML = [...items, ...items].join("");
+  $("#tradeTickerTrack").innerHTML = items.length ? [...items, ...items].join("") : "";
 }
 
 function renderProjects() {
@@ -794,21 +645,6 @@ function renderProjects() {
   `).join("");
 }
 
-function generateCandles(project) {
-  const candles = [];
-  let price = Math.max(0.00008, project.marketCap / 68_000_000);
-  for (let i = 0; i < 76; i += 1) {
-    const shock = i === 34 ? 0.42 : i === 35 ? -0.24 : (Math.sin(i * 0.51) * 0.018);
-    const open = price;
-    const close = Math.max(0.00004, open * (1 + shock + ((i % 7) - 3) * 0.002));
-    const high = Math.max(open, close) * (1 + (i === 34 ? 0.38 : 0.035));
-    const low = Math.min(open, close) * (1 - (i === 35 ? 0.18 : 0.026));
-    candles.push({ open, high, low, close });
-    price = close;
-  }
-  return candles;
-}
-
 function drawTradeChart(project, backendCandles = null) {
   const canvas = $("#tradeChart");
   const context = canvas.getContext("2d");
@@ -832,9 +668,14 @@ function drawTradeChart(project, backendCandles = null) {
     context.stroke();
   }
 
-  const candles = backendCandles && backendCandles.length
-    ? backendCandles
-    : generateCandles(project);
+  const candles = backendCandles || [];
+  if (!candles.length) {
+    context.fillStyle = "#f3c98b";
+    context.font = "16px sans-serif";
+    context.fillText("暂无真实成交 K 线", 54, 64);
+    $("#chartPriceTag").textContent = "--";
+    return;
+  }
   const max = Math.max(...candles.map((candle) => candle.high));
   const min = Math.min(...candles.map((candle) => candle.low));
   const scaleY = (value) => height - 32 - ((value - min) / (max - min || 1)) * (height - 64);
@@ -888,27 +729,11 @@ function renderTradeTable(project, backendTrades = null) {
     return;
   }
 
-  const rows = Array.from({ length: 6 }, (_, index) => {
-    const isBuy = index % 3 !== 1;
-    const usd = (project.marketCap * (0.00042 + index * 0.00031)).toFixed(3);
-    const bnb = (0.058 + index * 0.041).toFixed(3);
-    const tokens = Math.round((Number(bnb) * 10000) / Math.max(3, project.progress / 18)).toLocaleString();
-    return `
-      <div class="trade-row ${isBuy ? "buy" : "sell"}">
-        <span>0x${(project.creator + index).slice(2, 6)}...${(project.contract || project.creator).slice(-6)}</span>
-        <strong>${usd}</strong>
-        <strong>${bnb}</strong>
-        <strong>${tokens}</strong>
-        <span>${7 + index} 分钟前</span>
-        <button type="button">↗</button>
-      </div>
-    `;
-  }).join("");
   $("#tradeTable").innerHTML = `
     <div class="trade-row trade-row-head">
       <span>账户</span><span>USD</span><span>BNB</span><span>${project.symbol}</span><span>日期</span><span>TXN</span>
     </div>
-    ${rows}
+    <div class="empty-market">暂无真实成交记录</div>
   `;
 }
 
@@ -923,7 +748,7 @@ function estimateSwapReceive() {
     || !window.ethers
     || !ethers.isAddress(project.contract || "")
   ) {
-    $("#swapReceive").textContent = "这是首页演示项目；真实链上项目会在创建成功后自动打开交易。";
+    $("#swapReceive").textContent = "这个项目还没有同步到链上 projectId，暂时不能交易。";
     return;
   }
   const amount = Math.max(0, Number($("#swapAmount").value || 0));
@@ -1025,7 +850,7 @@ async function getTradeSigner() {
 
 function requireTradableProject(project) {
   if (!project || project.projectId === undefined || project.projectId === null || !window.ethers || !ethers.isAddress(project.contract || "")) {
-    throw new Error("这个项目还是首页演示数据，没有链上 projectId。请先创建真实项目，或接入项目索引数据后再交易。");
+    throw new Error("这个项目还没有同步到链上 projectId，暂时不能交易。");
   }
 }
 
@@ -1142,7 +967,7 @@ function setSwapSide(side) {
     : "选择卖出比例或手动输入代币数量";
   const canTrade = project && project.projectId !== undefined && project.projectId !== null && window.ethers && ethers.isAddress(project.contract || "");
   $("#swapSubmit").disabled = !canTrade;
-  $("#swapSubmit").textContent = canTrade ? (side === "buy" ? "购买" : "卖出") : "演示项目不可交易";
+  $("#swapSubmit").textContent = canTrade ? (side === "buy" ? "购买" : "卖出") : "未同步不可交易";
   $("#swapAmount").value = side === "buy" ? "0.1" : "1";
   if (side === "sell") {
     refreshSelectedTokenBalance();
@@ -1198,7 +1023,7 @@ function openTradeModal(project) {
     ? "该项目已上线 Pancake Swap，可从外盘继续交易。"
     : "该项目仍在 roo 内盘，达到发射阈值后可进入 Pancake Swap。";
   if (project.projectId === undefined || project.projectId === null) {
-    $("#swapReceive").textContent = "这是首页演示项目；真实链上项目会在创建成功后自动打开交易。";
+    $("#swapReceive").textContent = "这个项目还没有同步到链上 projectId，暂时不能交易。";
   }
   refreshTradeData(project);
   setSwapSide("buy");
