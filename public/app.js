@@ -277,6 +277,10 @@ const state = {
   walletCapEnabled: true,
   marketFilter: "all",
   marketSearch: "",
+  hardCapFilter: "all",
+  marketSort: "default",
+  marketLoading: false,
+  language: "zh",
   listedOnly: false,
   selectedProject: null,
   swapSide: "buy",
@@ -380,12 +384,17 @@ function mergeProjects(realProjects) {
 
 async function loadBackendProjects() {
   try {
+    state.marketLoading = true;
+    renderProjects();
     const data = await apiGet("/api/projects");
     mergeProjects(data.projects || []);
     renderTradeTicker();
     renderProjects();
   } catch {
     projects = [];
+  } finally {
+    state.marketLoading = false;
+    renderProjects();
   }
 }
 
@@ -556,9 +565,23 @@ function formatMarketCap(value) {
   return String(value);
 }
 
+function parseLaunchThreshold(project) {
+  const match = String(project.raised || "").match(/\/\s*([0-9.]+)/);
+  return match ? Number(match[1]) : 0;
+}
+
+function getProjectTimeValue(project) {
+  const raw = project.createdAt || project.created_at || project.updatedAt || "";
+  const parsed = raw ? Date.parse(raw) : Number.NaN;
+  if (!Number.isNaN(parsed)) {
+    return parsed;
+  }
+  return Number(project.projectId || 0);
+}
+
 function getVisibleProjects() {
   const keyword = state.marketSearch.trim().toLowerCase();
-  return projects
+  const filtered = projects
     .filter((project) => {
       if (state.marketFilter === "all") {
         return true;
@@ -570,12 +593,39 @@ function getVisibleProjects() {
     })
     .filter((project) => !state.listedOnly || project.listed)
     .filter((project) => {
+      const threshold = parseLaunchThreshold(project);
+      if (state.hardCapFilter === "low") {
+        return threshold >= 3 && threshold <= 4;
+      }
+      if (state.hardCapFilter === "mid") {
+        return threshold >= 5 && threshold <= 6;
+      }
+      if (state.hardCapFilter === "high") {
+        return threshold >= 7;
+      }
+      return true;
+    })
+    .filter((project) => {
       if (!keyword) {
         return true;
       }
       return `${project.name} ${project.symbol} ${project.contract || ""}`.toLowerCase().includes(keyword);
-    })
-    .sort((a, b) => b.marketCap - a.marketCap);
+    });
+  const sorters = {
+    marketCap: (a, b) => Number(b.marketCap || 0) - Number(a.marketCap || 0),
+    progress: (a, b) => Number(b.progress || 0) - Number(a.progress || 0),
+    newest: (a, b) => getProjectTimeValue(b) - getProjectTimeValue(a),
+    endSoon: (a, b) => Number(b.progress || 0) - Number(a.progress || 0),
+    hot: (a, b) => (Number(b.holders || 0) * 2 + Number(b.progress || 0) + Number(b.marketCap || 0) / 10000)
+      - (Number(a.holders || 0) * 2 + Number(a.progress || 0) + Number(a.marketCap || 0) / 10000),
+    default: (a, b) => {
+      const score = (project) => (project.listed ? 300 : 0)
+        + Number(project.progress || 0)
+        + (Number(project.marketCap || 0) / 10000);
+      return score(b) - score(a);
+    }
+  };
+  return filtered.sort(sorters[state.marketSort] || sorters.default);
 }
 
 function renderTradeTicker() {
@@ -595,9 +645,13 @@ function renderTradeTicker() {
 
 function renderProjects() {
   const list = $("#projectList");
+  if (state.marketLoading) {
+    list.innerHTML = `<div class="empty-market loading-state">${t("loadingProjects")}</div>`;
+    return;
+  }
   const visibleProjects = getVisibleProjects();
   if (visibleProjects.length === 0) {
-    list.innerHTML = `<div class="empty-market">没有找到匹配项目。</div>`;
+    list.innerHTML = `<div class="empty-market">${t("emptyProjects")}</div>`;
     return;
   }
   list.innerHTML = visibleProjects.map((project) => `
@@ -643,6 +697,143 @@ function renderProjects() {
       </div>
     </article>
   `).join("");
+}
+
+function renderProfileList(selector, items, emptyText) {
+  const target = $(selector);
+  if (!target) {
+    return;
+  }
+  if (!items.length) {
+    target.innerHTML = `<div class="profile-empty">${emptyText}</div>`;
+    return;
+  }
+  target.innerHTML = items.map((project) => `
+    <button class="profile-token-row" type="button" data-profile-project="${project.symbol}">
+      ${getProjectAvatarMarkup(project)}
+      <span>
+        <strong>${project.name}</strong>
+        <small>${project.symbol} · ${project.raised || "--"}</small>
+      </span>
+      <b>${project.listed ? "Listed" : "Internal"}</b>
+    </button>
+  `).join("");
+}
+
+const translations = {
+  zh: {
+    filterHardCapAll: "硬顶",
+    sortDefault: "默认推荐",
+    sortMarketCap: "市值",
+    sortProgress: "进度",
+    sortStartTime: "开始时间",
+    sortEndTime: "接近结束",
+    sortHot: "热度",
+    loadingProjects: "Loading microsales...",
+    emptyProjects: "暂无真实项目。请创建项目，或点击刷新同步链上历史项目。"
+  },
+  en: {
+    filterHardCapAll: "Hard cap",
+    sortDefault: "Default",
+    sortMarketCap: "Market cap",
+    sortProgress: "Progress",
+    sortStartTime: "Start time",
+    sortEndTime: "End time",
+    sortHot: "Hot",
+    loadingProjects: "Loading microsales...",
+    emptyProjects: "No real projects yet. Create one or refresh to sync chain history."
+  }
+};
+
+function t(key) {
+  return (translations[state.language] && translations[state.language][key])
+    || translations.zh[key]
+    || key;
+}
+
+async function refreshProfile() {
+  const wallet = normalizeAddress(state.wallet);
+  $("#profileWallet").textContent = wallet ? shortAddress(state.wallet) : "未连接";
+  if (!wallet) {
+    $("#profileCreatedCount").textContent = "0";
+    $("#profileTradedCount").textContent = "0";
+    $("#profileHoldingCount").textContent = "0";
+    renderProfileList("#createdTokenList", [], "连接钱包后显示你创建的代币。");
+    renderProfileList("#tradedTokenList", [], "连接钱包后显示你交易过的代币。");
+    renderProfileList("#holdingTokenList", [], "连接钱包后显示你的持仓。");
+    return;
+  }
+
+  const created = projects.filter((project) => normalizeAddress(project.creator) === wallet);
+  const tradedMap = new Map();
+  for (const project of projects.slice(0, 80)) {
+    if (project.projectId === undefined || project.projectId === null) {
+      continue;
+    }
+    try {
+      const data = await apiGet(`/api/trades?projectId=${encodeURIComponent(project.projectId)}`);
+      if ((data.trades || []).some((trade) => normalizeAddress(trade.account) === wallet)) {
+        tradedMap.set(project.symbol, project);
+      }
+    } catch {
+      // Profile should stay usable even if one trade list fails.
+    }
+  }
+
+  const holdings = [];
+  if (window.ethers && window.ethereum) {
+    try {
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      for (const project of projects.slice(0, 80)) {
+        if (!ethers.isAddress(project.contract || "")) {
+          continue;
+        }
+        try {
+          const token = new ethers.Contract(project.contract, ERC20_ABI, provider);
+          const balance = await token.balanceOf(state.wallet);
+          if (balance > 0n) {
+            holdings.push(project);
+          }
+        } catch {
+          // Ignore tokens that cannot be read.
+        }
+      }
+    } catch {
+      // Wallet/provider unavailable.
+    }
+  }
+
+  const traded = Array.from(tradedMap.values());
+  $("#profileCreatedCount").textContent = String(created.length);
+  $("#profileTradedCount").textContent = String(traded.length);
+  $("#profileHoldingCount").textContent = String(holdings.length);
+  renderProfileList("#createdTokenList", created, "还没有创建过代币。");
+  renderProfileList("#tradedTokenList", traded, "还没有真实交易记录。");
+  renderProfileList("#holdingTokenList", holdings, "没有读取到持仓。");
+}
+
+function openMenu() {
+  $("#sideDrawer").hidden = false;
+  document.body.classList.add("drawer-open");
+}
+
+function closeMenu() {
+  $("#sideDrawer").hidden = true;
+  document.body.classList.remove("drawer-open");
+}
+
+function setLanguage(lang) {
+  state.language = lang || "zh";
+  $$(".language-toggle button").forEach((button) => {
+    button.classList.toggle("active", button.dataset.lang === state.language);
+  });
+  document.documentElement.lang = state.language === "zh" ? "zh-CN" : "en";
+  $$("[data-i18n]").forEach((element) => {
+    element.textContent = t(element.dataset.i18n);
+  });
+  if ($("#projectList")) {
+    renderProjects();
+  }
 }
 
 function drawTradeChart(project, backendCandles = null) {
@@ -1081,12 +1272,17 @@ function updateTabs(nextTab) {
   const panels = {
     market: "#marketPanel",
     create: "#createPanel",
-    treasury: "#treasuryPanel"
+    treasury: "#treasuryPanel",
+    profile: "#profilePanel",
+    faq: "#faqPanel"
   };
 
   Object.entries(panels).forEach(([name, selector]) => {
     $(selector).classList.toggle("active", name === nextTab);
   });
+  if (nextTab === "profile") {
+    refreshProfile();
+  }
 }
 
 function updateTaxState() {
@@ -1241,9 +1437,11 @@ async function connectWallet() {
   state.wallet = accounts[0] || "";
   if (state.wallet) {
     $("#connectButton").textContent = shortAddress(state.wallet);
+    $("#profileConnectButton").textContent = shortAddress(state.wallet);
   }
 
   await ensureBscNetwork();
+  refreshProfile();
   return state.wallet;
 }
 
@@ -1468,6 +1666,24 @@ function bindEvents() {
     tab.addEventListener("click", () => updateTabs(tab.dataset.tab));
   });
 
+  $("#menuButton").addEventListener("click", openMenu);
+  $$("[data-close-menu]").forEach((button) => {
+    button.addEventListener("click", closeMenu);
+  });
+  $$("[data-drawer-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      updateTabs(button.dataset.drawerTab);
+      closeMenu();
+    });
+  });
+  $$(".language-toggle button").forEach((button) => {
+    button.addEventListener("click", () => setLanguage(button.dataset.lang));
+  });
+  $("#profileConnectButton").addEventListener("click", async () => {
+    await connectWallet();
+    await refreshProfile();
+  });
+
   $$("[data-open-create]").forEach((button) => {
     button.addEventListener("click", () => updateTabs("create"));
   });
@@ -1482,22 +1698,34 @@ function bindEvents() {
     });
   });
 
-  $$(".market-sort button").forEach((button) => {
-    const label = button.textContent.trim();
-    if (label.includes("刷新") || label.includes("鍒锋柊")) {
-      button.addEventListener("click", async () => {
-        button.disabled = true;
-        const previousText = button.textContent;
-        button.textContent = "同步中...";
-        try {
-          await loadBackendProjects();
-          await syncChainProjects();
-        } finally {
-          button.disabled = false;
-          button.textContent = previousText;
-        }
-      });
+  $("#marketCapSortButton").addEventListener("click", () => {
+    state.marketSort = "marketCap";
+    $("#marketSortSelect").value = "marketCap";
+    renderProjects();
+  });
+
+  $("#refreshProjectsButton").addEventListener("click", async () => {
+    const button = $("#refreshProjectsButton");
+    button.disabled = true;
+    const previousText = button.textContent;
+    button.textContent = "同步中...";
+    try {
+      await loadBackendProjects();
+      await syncChainProjects();
+    } finally {
+      button.disabled = false;
+      button.textContent = previousText;
     }
+  });
+
+  $("#hardCapFilter").addEventListener("change", (event) => {
+    state.hardCapFilter = event.target.value;
+    renderProjects();
+  });
+
+  $("#marketSortSelect").addEventListener("change", (event) => {
+    state.marketSort = event.target.value;
+    renderProjects();
   });
 
   $("#listedOnly").addEventListener("change", (event) => {
@@ -1547,6 +1775,19 @@ function bindEvents() {
     if (project) {
       openTradeModal(project);
     }
+  });
+
+  $$(".profile-list").forEach((list) => {
+    list.addEventListener("click", (event) => {
+      const row = event.target.closest("[data-profile-project]");
+      if (!row) {
+        return;
+      }
+      const project = projects.find((item) => item.symbol === row.dataset.profileProject);
+      if (project) {
+        openTradeModal(project);
+      }
+    });
   });
 
   $$("[data-close-trade]").forEach((element) => {

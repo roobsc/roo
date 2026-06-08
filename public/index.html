@@ -14,6 +14,11 @@
       </div>
 
       <header class="topbar">
+        <button id="menuButton" class="menu-button" type="button" aria-label="Open menu">
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
         <a class="brand" href="./index.html" aria-label="roo">
           <span class="brand-mark" aria-hidden="true">
             <img src="./assets/roo-avatar.jpg" alt="" />
@@ -31,6 +36,10 @@
         </nav>
 
         <div class="top-actions">
+          <div class="language-toggle" aria-label="Language">
+            <button type="button" data-lang="en">EN</button>
+            <button class="active" type="button" data-lang="zh">中文</button>
+          </div>
           <button id="networkButton" class="network-chip" type="button">BSC</button>
           <button id="connectButton" class="wallet-button" type="button">连接钱包</button>
         </div>
@@ -77,9 +86,25 @@
                 <button class="filter" type="button" data-market-filter="new">新创建</button>
                 <button class="filter" type="button" data-market-filter="launched">已发射</button>
               </div>
+              <div class="market-extra-filters" aria-label="Project filters">
+                <select id="hardCapFilter" aria-label="Hard cap filter">
+                  <option value="all" data-i18n="filterHardCapAll">硬顶</option>
+                  <option value="low">3-4 BNB</option>
+                  <option value="mid">5-6 BNB</option>
+                  <option value="high">7-8 BNB</option>
+                </select>
+                <select id="marketSortSelect" aria-label="Sort projects">
+                  <option value="default" data-i18n="sortDefault">默认推荐</option>
+                  <option value="marketCap" data-i18n="sortMarketCap">市值</option>
+                  <option value="progress" data-i18n="sortProgress">进度</option>
+                  <option value="newest" data-i18n="sortStartTime">开始时间</option>
+                  <option value="endSoon" data-i18n="sortEndTime">接近结束</option>
+                  <option value="hot" data-i18n="sortHot">热度</option>
+                </select>
+              </div>
               <div class="market-sort">
-                <button type="button" aria-label="按市值排序">市值排名</button>
-                <button type="button" aria-label="刷新项目">刷新</button>
+                <button id="marketCapSortButton" type="button" aria-label="按市值排序">市值排名</button>
+                <button id="refreshProjectsButton" type="button" aria-label="刷新项目">刷新</button>
               </div>
             </section>
 
@@ -357,7 +382,84 @@
             </div>
           </div>
         </section>
+
+        <section id="profilePanel" class="panel-page" aria-label="Profile">
+          <div class="profile-layout">
+            <div class="section-head">
+              <div>
+                <span class="eyebrow">Profile</span>
+                <h1>个人资料</h1>
+              </div>
+              <button id="profileConnectButton" class="primary-action" type="button">连接钱包</button>
+            </div>
+            <div class="profile-summary">
+              <div><span>钱包</span><strong id="profileWallet">未连接</strong></div>
+              <div><span>创建项目</span><strong id="profileCreatedCount">0</strong></div>
+              <div><span>交易代币</span><strong id="profileTradedCount">0</strong></div>
+              <div><span>当前持仓</span><strong id="profileHoldingCount">0</strong></div>
+            </div>
+            <div class="profile-grid">
+              <section class="profile-card">
+                <h2>我创建的代币</h2>
+                <div id="createdTokenList" class="profile-list"></div>
+              </section>
+              <section class="profile-card">
+                <h2>我交易过的代币</h2>
+                <div id="tradedTokenList" class="profile-list"></div>
+              </section>
+              <section class="profile-card">
+                <h2>我的持仓</h2>
+                <div id="holdingTokenList" class="profile-list"></div>
+              </section>
+            </div>
+          </div>
+        </section>
+
+        <section id="faqPanel" class="panel-page" aria-label="FAQ">
+          <div class="faq-layout">
+            <div class="section-head">
+              <div>
+                <span class="eyebrow">FAQ</span>
+                <h1>常见问题</h1>
+              </div>
+            </div>
+            <div class="faq-list">
+              <details open>
+                <summary>什么是内盘发射？</summary>
+                <p>项目先在 roo 内盘完成限购交易和底池积累，达到设置的 BNB 阈值后再发射到 Pancake Swap。</p>
+              </details>
+              <details>
+                <summary>什么是已发射项目？</summary>
+                <p>已发射表示发射台合约记录该项目已经迁移到 Pancake Swap，外盘 LP 会进入黑洞地址。</p>
+              </details>
+              <details>
+                <summary>头像和 K 线数据存在哪里？</summary>
+                <p>头像保存在 Vercel Blob，项目、交易和 K 线原始成交记录保存在 Neon/Postgres。</p>
+              </details>
+              <details>
+                <summary>什么是审计代币？</summary>
+                <p>审计代币通常指合约代码经过第三方安全检查的代币。roo 页面展示不等于审计背书，用户仍需自行判断风险。</p>
+              </details>
+            </div>
+          </div>
+        </section>
       </main>
+    </div>
+
+    <div id="sideDrawer" class="side-drawer" hidden>
+      <div class="drawer-backdrop" data-close-menu></div>
+      <aside class="drawer-panel" aria-label="Navigation drawer">
+        <div class="drawer-brand">
+          <img src="./assets/roo-avatar.jpg" alt="" />
+          <strong>roo</strong>
+          <button type="button" data-close-menu aria-label="Close menu">×</button>
+        </div>
+        <button type="button" data-drawer-tab="market">Launchpad</button>
+        <button type="button" data-drawer-tab="create">Create Token</button>
+        <button type="button" data-drawer-tab="treasury">Treasury</button>
+        <button type="button" data-drawer-tab="profile">Profile</button>
+        <button type="button" data-drawer-tab="faq">FAQ</button>
+      </aside>
     </div>
 
     <div id="tradeModal" class="trade-modal" hidden>
