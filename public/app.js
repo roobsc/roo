@@ -1250,6 +1250,7 @@ function drawTradeChart(project, backendCandles = null) {
   const chartWidth = chartRight - chartLeft;
   const chartHeight = chartBottom - chartTop;
   const formatPrice = (value) => Number(value || 0).toFixed(8).replace(/0+$/, "").replace(/\.$/, "");
+  const displayPrice = Number((backendCandles && backendCandles.length ? backendCandles[backendCandles.length - 1].close : project.priceBnb) || 0);
 
   context.clearRect(0, 0, width, height);
   context.fillStyle = "#171717";
@@ -1277,7 +1278,7 @@ function drawTradeChart(project, backendCandles = null) {
     context.fillStyle = "#37ff14";
     context.font = "16px sans-serif";
     context.fillText("暂无真实成交 K 线", chartLeft + 14, chartTop + 28);
-    $("#chartPriceTag").textContent = "--";
+    $("#chartPriceTag").textContent = displayPrice > 0 ? formatPrice(displayPrice) : "--";
     $("#chartPriceTag").style.top = "50%";
     return;
   }
@@ -1323,15 +1324,22 @@ function drawTradeChart(project, backendCandles = null) {
     const x = chartLeft + index * step + Math.max(0, (step - candleWidth) / 2);
     const isUp = candle.close >= candle.open;
     const color = isUp ? chartGreen : chartRed;
+    const centerX = x + candleWidth / 2;
+    const openY = scaleY(candle.open);
+    const closeY = scaleY(candle.close);
+    const highY = scaleY(candle.high);
+    const lowY = scaleY(candle.low);
     context.strokeStyle = color;
     context.fillStyle = color;
+    context.lineWidth = 1.4;
     context.beginPath();
-    context.moveTo(x + candleWidth / 2, scaleY(candle.high));
-    context.lineTo(x + candleWidth / 2, scaleY(candle.low));
+    context.moveTo(centerX, highY);
+    context.lineTo(centerX, lowY);
     context.stroke();
-    const y = Math.min(scaleY(candle.open), scaleY(candle.close));
-    const bodyHeight = Math.max(2, Math.abs(scaleY(candle.open) - scaleY(candle.close)));
-    context.fillRect(x, y, candleWidth, bodyHeight);
+    const bodyHeight = Math.max(7, Math.abs(openY - closeY));
+    const bodyY = Math.min(openY, closeY) - (bodyHeight === 7 ? 3.5 : 0);
+    const bodyWidth = Math.max(6, candleWidth);
+    context.fillRect(centerX - bodyWidth / 2, bodyY, bodyWidth, bodyHeight);
   });
 
   const last = candles[candles.length - 1].close;
@@ -1343,7 +1351,7 @@ function drawTradeChart(project, backendCandles = null) {
   context.lineTo(chartRight, y);
   context.stroke();
   context.setLineDash([]);
-  $("#chartPriceTag").textContent = formatPrice(last);
+  $("#chartPriceTag").textContent = formatPrice(displayPrice || last);
   $("#chartPriceTag").style.top = `${Math.max(chartTop + 4, Math.min(chartBottom - 18, y - 10))}px`;
   $("#chartPriceTag").style.background = trendColor;
   $("#chartPriceTag").style.color = "#111";
