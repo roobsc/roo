@@ -399,9 +399,9 @@ async function apiPost(path, data) {
 function mergeProjects(realProjects) {
   const byKey = new Map();
   realProjects.forEach((project) => {
-    const key = project.projectId !== undefined && project.projectId !== null
-      ? `id:${project.projectId}`
-      : `token:${normalizeAddress(project.contract || project.symbol)}`;
+    const key = project.contract
+      ? `token:${normalizeAddress(project.contract)}`
+      : `id:${project.projectId ?? project.symbol}`;
     const existing = byKey.get(key);
     const next = existing ? { ...existing, ...project } : { ...project };
     if (existing && (!project.avatarUrl || project.avatarUrl === defaultAvatar) && existing.avatarUrl && existing.avatarUrl !== defaultAvatar) {
@@ -433,9 +433,9 @@ function normalizeAddress(address) {
 }
 
 function upsertLocalProject(project) {
-  const key = project.projectId !== undefined && project.projectId !== null
-    ? (item) => String(item.projectId) === String(project.projectId)
-    : (item) => normalizeAddress(item.contract) === normalizeAddress(project.contract);
+  const key = project.contract
+    ? (item) => normalizeAddress(item.contract) === normalizeAddress(project.contract)
+    : (item) => String(item.projectId) === String(project.projectId);
   const index = projects.findIndex(key);
   const existing = index >= 0 ? projects[index] : null;
   const merged = existing ? { ...existing, ...project } : { ...project };
@@ -1153,7 +1153,7 @@ async function refreshProfile() {
       continue;
     }
     try {
-      const data = await apiGet(`/api/trades?projectId=${encodeURIComponent(project.projectId)}`);
+      const data = await apiGet(`/api/trades?projectId=${encodeURIComponent(project.projectId)}&token=${encodeURIComponent(project.contract || "")}`);
       if ((data.trades || []).some((trade) => normalizeAddress(trade.account) === wallet)) {
         tradedMap.set(project.symbol, project);
       }
@@ -1782,8 +1782,8 @@ async function refreshTradeData(project) {
   }
   try {
     const [tradesData, candlesData] = await Promise.all([
-      apiGet(`/api/trades?projectId=${encodeURIComponent(project.projectId)}`),
-      apiGet(`/api/candles?projectId=${encodeURIComponent(project.projectId)}&interval=1m`)
+      apiGet(`/api/trades?projectId=${encodeURIComponent(project.projectId)}&token=${encodeURIComponent(project.contract || "")}`),
+      apiGet(`/api/candles?projectId=${encodeURIComponent(project.projectId)}&token=${encodeURIComponent(project.contract || "")}&interval=1m`)
     ]);
     const trades = tradesData.trades || [];
     const candles = (candlesData.candles || []).length ? candlesData.candles : buildCandlesFromTrades(trades);

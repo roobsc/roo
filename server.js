@@ -154,21 +154,36 @@ async function upsertProjectStore(project) {
   return saved;
 }
 
-async function getTradesStore(projectId) {
+function normalizeToken(token) {
+  return String(token || "").toLowerCase();
+}
+
+async function getTradesStore(projectId, token = "") {
+  const normalizedToken = normalizeToken(token);
   if (!sql) {
     const db = readDb();
     return db.trades
-      .filter((trade) => String(trade.projectId) === String(projectId))
+      .filter((trade) => normalizedToken
+        ? normalizeToken(trade.token) === normalizedToken
+        : String(trade.projectId) === String(projectId))
       .sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
   }
   await ensureSchema();
-  const rows = await sql`
-    select data
-    from trades
-    where project_id = ${String(projectId || "")}
-    order by timestamp_ms desc
-    limit 300
-  `;
+  const rows = normalizedToken
+    ? await sql`
+      select data
+      from trades
+      where lower(token) = ${normalizedToken}
+      order by timestamp_ms desc
+      limit 300
+    `
+    : await sql`
+      select data
+      from trades
+      where project_id = ${String(projectId || "")}
+      order by timestamp_ms desc
+      limit 300
+    `;
   return rows.map((row) => row.data);
 }
 
@@ -210,17 +225,49 @@ async function saveTradeStore(trade) {
   return saved;
 }
 
-async function getCandlesStore(projectId, interval) {
+async function getCandlesStore(projectId, interval, token = "") {
+  const normalizedToken = normalizeToken(token);
   if (!sql) {
     const db = readDb();
     const trades = db.trades
-      .filter((trade) => String(trade.projectId) === String(projectId))
+      .filter((trade) => normalizedToken
+        ? normalizeToken(trade.token) === normalizedToken
+        : String(trade.projectId) === String(projectId))
       .sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0));
     return buildCandles(trades, interval);
   }
   await ensureSchema();
   const bucketMs = intervalToMs(interval);
-  const rows = await sql`
+  const rows = normalizedToken ? await sql`
+    with ordered as (
+      select
+        floor(timestamp_ms / ${bucketMs}) * ${bucketMs} as bucket,
+        timestamp_ms,
+        price_bnb::float8 as price,
+        bnb_amount::float8 as volume
+      from trades
+      where lower(token) = ${normalizedToken}
+        and price_bnb > 0
+    ),
+    ranked as (
+      select
+        *,
+        first_value(price) over (partition by bucket order by timestamp_ms asc) as open,
+        first_value(price) over (partition by bucket order by timestamp_ms desc) as close
+      from ordered
+    )
+    select
+      bucket::bigint as time,
+      (array_agg(price order by timestamp_ms asc))[1]::float8 as open,
+      max(price)::float8 as high,
+      min(price)::float8 as low,
+      (array_agg(price order by timestamp_ms desc))[1]::float8 as close,
+      sum(volume)::float8 as volume
+    from ranked
+    group by bucket
+    order by bucket asc
+    limit 500
+  ` : await sql`
     with ordered as (
       select
         floor(timestamp_ms / ${bucketMs}) * ${bucketMs} as bucket,
@@ -345,6 +392,9 @@ async function uploadAvatar(payload) {
 }
 
 function getProjectKey(project) {
+  if (project.contract) {
+    return `token:${String(project.contract).toLowerCase()}`;
+  }
   if (project.projectId !== undefined && project.projectId !== null) {
     return `id:${project.projectId}`;
   }
@@ -606,7 +656,8 @@ async function handleApi(req, res, url) {
 
   if (req.method === "GET" && url.pathname === "/api/trades") {
     const projectId = url.searchParams.get("projectId");
-    const trades = await getTradesStore(projectId);
+    const token = url.searchParams.get("token");
+    const trades = await getTradesStore(projectId, token);
     return sendJson(res, 200, { trades });
   }
 
@@ -618,8 +669,9 @@ async function handleApi(req, res, url) {
 
   if (req.method === "GET" && url.pathname === "/api/candles") {
     const projectId = url.searchParams.get("projectId");
+    const token = url.searchParams.get("token");
     const interval = url.searchParams.get("interval") || "1m";
-    const candles = await getCandlesStore(projectId, interval);
+    const candles = await getCandlesStore(projectId, interval, token);
     return sendJson(res, 200, { candles });
   }
 
