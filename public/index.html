@@ -592,10 +592,10 @@
               <div class="swap-topline">
                 <label class="mev-toggle">
                   MEV保护
-                  <input type="checkbox" />
+                  <input id="mevProtectionInput" type="checkbox" />
                   <span></span>
                 </label>
-                <button type="button">15%</button>
+                <button id="slippageButton" type="button">15%</button>
               </div>
 
               <div class="swap-tabs">
@@ -608,6 +608,13 @@
                 <strong id="swapUnit">BNB</strong>
                 <button type="button" id="swapReverse">⇄</button>
               </label>
+
+              <label class="swap-input token-buy-input" id="buyTokenInputWrap">
+                <input id="buyTokenAmount" type="number" min="0" step="0.000001" value="100" placeholder="输入要买多少枚代币" />
+                <strong id="buyTokenUnit">代币</strong>
+                <button type="button" id="useTokenBuyMode">枚</button>
+              </label>
+              <p class="buy-cap-quote" id="buyCapQuote">100 枚预计需要 -- BNB</p>
 
               <div class="quick-amounts">
                 <button type="button" data-amount="0.1">0.1 BNB</button>

@@ -301,6 +301,9 @@ const state = {
   listedOnly: false,
   selectedProject: null,
   swapSide: "buy",
+  buyInputMode: "bnb",
+  mevProtection: false,
+  slippagePercent: 15,
   selectedTokenBalance: 0,
   chainSyncing: false,
   taxEnabled: false,
@@ -320,6 +323,13 @@ const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
 function shortAddress(address) {
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
+}
+
+function compactAddress(address, head = 10, tail = 8) {
+  if (!address || address.length <= head + tail + 3) {
+    return address || "--";
+  }
+  return `${address.slice(0, head)}...${address.slice(-tail)}`;
 }
 
 function clampNumber(value, min, max) {
@@ -764,8 +774,12 @@ function renderProjects() {
         </div>
         <dl class="project-facts">
           <div>
-            <dt>${t("creatorLabel")}:</dt>
-            <dd>${project.creator}</dd>
+            <dt>合约地址:</dt>
+            <dd>
+              <button class="inline-copy-address" type="button" data-copy-address="${project.contract || ""}" title="${project.contract || ""}">
+                ${compactAddress(project.contract)}
+              </button>
+            </dd>
           </div>
           <div>
             <dt>${t("marketCapLabel")}:</dt>
@@ -1404,7 +1418,9 @@ async function estimateSwapReceive() {
     $("#swapReceive").textContent = "这个项目还没有同步到链上 projectId，暂时不能交易。";
     return;
   }
-  const amount = Math.max(0, Number($("#swapAmount").value || 0));
+  const bnbInputAmount = Math.max(0, Number($("#swapAmount").value || 0));
+  const tokenInputAmount = Math.max(0, Number($("#buyTokenAmount").value || 0));
+  const amount = state.swapSide === "buy" && state.buyInputMode === "token" ? tokenInputAmount : bnbInputAmount;
   try {
     if (window.ethers && amount > 0) {
       const provider = window.ethereum
@@ -1412,10 +1428,16 @@ async function estimateSwapReceive() {
         : new ethers.JsonRpcProvider(config.rpcUrl || "https://bsc-dataseed.binance.org");
       const launchpad = getLaunchpadContract(provider);
       if (state.swapSide === "buy") {
+        if (state.buyInputMode === "token") {
+          const tokenAmount = ethers.parseEther(String(amount));
+          const cost = await launchpad.quoteBuy(BigInt(project.projectId), tokenAmount);
+          $("#swapReceive").textContent = `预计支付: ${Number(ethers.formatEther(cost)).toFixed(6)} BNB`;
+          return;
+        }
         const bnbAmount = ethers.parseEther(String(amount));
-        const oneTokenCost = await launchpad.quoteBuy(BigInt(project.projectId), ethers.parseEther("1"));
-        if (oneTokenCost > 0n) {
-          const estimated = (bnbAmount * ethers.parseEther("1")) / oneTokenCost;
+        const maxTokenAmount = ethers.parseEther(String(project.cap || 100));
+        const estimated = await estimateTokenAmountForBnb(launchpad, BigInt(project.projectId), bnbAmount, maxTokenAmount);
+        if (estimated > 0n) {
           $("#swapReceive").textContent = `您将收到: ${Number(ethers.formatEther(estimated)).toFixed(6)} ${project.symbol}`;
           return;
         }
@@ -1431,12 +1453,50 @@ async function estimateSwapReceive() {
   }
   if (state.swapSide === "buy") {
     const price = Number(project.priceBnb || 0);
+    if (state.buyInputMode === "token") {
+      const estimatedCost = price > 0 ? amount * price : 0;
+      $("#swapReceive").textContent = `预计支付: ${estimatedCost.toFixed(6)} BNB`;
+      return;
+    }
     const estimated = price > 0 ? amount / price : 0;
     $("#swapReceive").textContent = `您将收到: ${estimated.toFixed(6)} ${project.symbol}`;
     return;
   }
   const estimatedBnb = amount * Number(project.priceBnb || 0);
   $("#swapReceive").textContent = `您将收到: ${estimatedBnb.toFixed(6)} BNB`;
+}
+
+async function updateBuyCapQuote(project = state.selectedProject) {
+  const element = $("#buyCapQuote");
+  if (!element) {
+    return;
+  }
+  if (!project || state.swapSide !== "buy") {
+    element.hidden = true;
+    return;
+  }
+  element.hidden = false;
+  const capTokens = Math.max(1, Number(project.cap || 100));
+  element.textContent = `${capTokens} 枚预计需要 -- BNB`;
+  try {
+    if (
+      project.projectId === undefined
+      || project.projectId === null
+      || !window.ethers
+      || !ethers.isAddress(project.contract || "")
+    ) {
+      throw new Error("not tradable");
+    }
+    const provider = window.ethereum
+      ? new ethers.BrowserProvider(window.ethereum)
+      : new ethers.JsonRpcProvider(config.rpcUrl || "https://bsc-dataseed.binance.org");
+    const launchpad = getLaunchpadContract(provider);
+    const cost = await launchpad.quoteBuy(BigInt(project.projectId), ethers.parseEther(String(capTokens)));
+    element.textContent = `${capTokens} 枚预计需要 ${Number(ethers.formatEther(cost)).toFixed(6)} BNB`;
+  } catch {
+    const estimated = Number(project.priceBnb || 0) * capTokens;
+    element.textContent = `${capTokens} 枚预计需要 ${estimated > 0 ? estimated.toFixed(6) : "--"} BNB`;
+  }
 }
 
 async function refreshSelectedTokenBalance() {
@@ -1532,12 +1592,32 @@ function requireTradableProject(project) {
   }
 }
 
+async function estimateTokenAmountForBnb(launchpad, projectId, maxBnbAmount, maxTokenAmount = ethers.parseEther("10000")) {
+  if (maxBnbAmount <= 0n) {
+    return 0n;
+  }
+  let low = 0n;
+  let high = maxTokenAmount;
+  for (let i = 0; i < 24; i += 1) {
+    const mid = (low + high + 1n) / 2n;
+    const cost = await launchpad.quoteBuy(projectId, mid);
+    if (cost <= maxBnbAmount) {
+      low = mid;
+    } else {
+      high = mid - 1n;
+    }
+  }
+  return low;
+}
+
 async function handleSwapSubmit() {
   const project = state.selectedProject;
   const button = $("#swapSubmit");
   try {
     requireTradableProject(project);
-    const rawAmount = Number($("#swapAmount").value || 0);
+    const rawAmount = state.swapSide === "buy" && state.buyInputMode === "token"
+      ? Number($("#buyTokenAmount").value || 0)
+      : Number($("#swapAmount").value || 0);
     if (!rawAmount || rawAmount <= 0) {
       throw new Error("请输入买入或卖出数量。");
     }
@@ -1548,21 +1628,27 @@ async function handleSwapSubmit() {
     const launchpad = getLaunchpadContract(signer);
 
     if (state.swapSide === "buy") {
-      const bnbAmount = ethers.parseEther(String(rawAmount));
-      const oneTokenCost = await launchpad.quoteBuy(BigInt(project.projectId), ethers.parseEther("1"));
-      if (oneTokenCost <= 0n) {
+      const maxTokenAmount = ethers.parseEther(String(project.cap || 100));
+      let tokenAmount;
+      if (state.buyInputMode === "token") {
+        tokenAmount = ethers.parseEther(String(rawAmount));
+      } else {
+        const bnbAmount = ethers.parseEther(String(rawAmount));
+        tokenAmount = await estimateTokenAmountForBnb(launchpad, BigInt(project.projectId), bnbAmount, maxTokenAmount);
+      }
+      if (tokenAmount === undefined) {
         throw new Error("报价异常，无法计算买入数量。");
       }
-      let tokenAmount = (bnbAmount * ethers.parseEther("1")) / oneTokenCost;
       if (tokenAmount <= 0n) {
         throw new Error("BNB 数量太小，无法买到代币。");
       }
-      const maxTokenAmount = ethers.parseEther(String(project.cap || 100));
       if (tokenAmount > maxTokenAmount) {
         tokenAmount = maxTokenAmount;
       }
       const cost = await launchpad.quoteBuy(BigInt(project.projectId), tokenAmount);
-      const tx = await launchpad.buy(BigInt(project.projectId), tokenAmount, { value: cost });
+      const slippageBps = BigInt(Math.round(Number(state.slippagePercent || 0) * 100));
+      const valueWithSlippage = cost + ((cost * slippageBps) / 10000n);
+      const tx = await launchpad.buy(BigInt(project.projectId), tokenAmount, { value: valueWithSlippage });
       $("#swapReceive").textContent = `购买交易已提交：${tx.hash}`;
       await tx.wait();
       await saveBackendTrade(project, {
@@ -1631,11 +1717,16 @@ async function saveBackendTrade(project, trade) {
 
 function setSwapSide(side) {
   state.swapSide = side;
+  if (side !== "buy") {
+    state.buyInputMode = "bnb";
+  }
   $$(".swap-tabs button").forEach((button) => {
     button.classList.toggle("active", button.dataset.swapSide === side);
   });
   const project = state.selectedProject;
   $("#swapUnit").textContent = side === "buy" ? "BNB" : (project ? project.symbol : "代币");
+  $("#buyTokenInputWrap").hidden = side !== "buy";
+  $("#buyTokenUnit").textContent = project ? project.symbol : "代币";
   $(".quick-amounts").hidden = side === "sell";
   $("#sellPercentages").hidden = side !== "sell";
   $("#swapAmount").step = side === "buy" ? "0.01" : "0.000001";
@@ -1650,6 +1741,7 @@ function setSwapSide(side) {
   if (side === "sell") {
     refreshSelectedTokenBalance();
   }
+  updateBuyCapQuote(project);
   estimateSwapReceive();
 }
 
@@ -2356,6 +2448,17 @@ function bindEvents() {
   });
 
   $("#projectList").addEventListener("click", (event) => {
+    const copyButton = event.target.closest("[data-copy-address]");
+    if (copyButton) {
+      event.stopPropagation();
+      copyText(copyButton.dataset.copyAddress || "");
+      const oldText = copyButton.textContent;
+      copyButton.textContent = "已复制";
+      setTimeout(() => {
+        copyButton.textContent = oldText;
+      }, 900);
+      return;
+    }
     const refreshEmpty = event.target.closest("[data-empty-refresh]");
     if (refreshEmpty) {
       refreshEmpty.disabled = true;
@@ -2406,10 +2509,38 @@ function bindEvents() {
     button.addEventListener("click", () => setSwapSide(button.dataset.swapSide));
   });
 
-  $("#swapAmount").addEventListener("input", estimateSwapReceive);
+  $("#swapAmount").addEventListener("input", () => {
+    if (state.swapSide === "buy") {
+      state.buyInputMode = "bnb";
+    }
+    estimateSwapReceive();
+  });
+  $("#buyTokenAmount").addEventListener("input", () => {
+    state.buyInputMode = "token";
+    estimateSwapReceive();
+  });
+  $("#useTokenBuyMode").addEventListener("click", () => {
+    state.buyInputMode = "token";
+    $("#buyTokenAmount").focus();
+    estimateSwapReceive();
+  });
+  $("#mevProtectionInput").addEventListener("change", (event) => {
+    state.mevProtection = event.target.checked;
+    estimateSwapReceive();
+  });
+  $("#slippageButton").addEventListener("click", () => {
+    const next = window.prompt("设置滑点百分比 1-50", String(state.slippagePercent));
+    if (next === null) {
+      return;
+    }
+    const value = Math.max(1, Math.min(50, Number(next || state.slippagePercent)));
+    state.slippagePercent = Number.isFinite(value) ? value : 15;
+    $("#slippageButton").textContent = `${state.slippagePercent}%`;
+  });
   $$(".quick-amounts button").forEach((button) => {
     button.addEventListener("click", () => {
       setSwapSide("buy");
+      state.buyInputMode = "bnb";
       $("#swapAmount").value = button.dataset.amount;
       estimateSwapReceive();
     });

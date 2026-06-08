@@ -1951,6 +1951,15 @@ select {
   background: #fff;
 }
 
+.mev-toggle input:checked + span {
+  background: linear-gradient(135deg, #00f0ff, #b100ff);
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.34);
+}
+
+.mev-toggle input:checked + span::after {
+  transform: translateX(18px);
+}
+
 .swap-topline > button {
   border: 1px solid rgba(0, 240, 255, 0.16);
   border-radius: 999px;
@@ -1997,6 +2006,12 @@ select {
   background: var(--bg-deep);
 }
 
+.token-buy-input {
+  margin-top: 10px;
+  grid-template-columns: minmax(0, 1fr) auto 44px;
+  border-color: rgba(177, 0, 255, 0.22);
+}
+
 .swap-input input {
   min-width: 0;
   border: 0;
@@ -2013,6 +2028,14 @@ select {
   color: var(--text-secondary);
   background: transparent;
   font-weight: 900;
+}
+
+.token-buy-input button {
+  border: 1px solid rgba(0, 240, 255, 0.22);
+  border-radius: 999px;
+  padding: 6px 0;
+  color: var(--text-accent);
+  background: rgba(0, 240, 255, 0.08);
 }
 
 .quick-amounts,
@@ -2044,10 +2067,30 @@ select {
 
 .swap-limit,
 .swap-receive,
-.token-balance {
+.token-balance,
+.buy-cap-quote {
   color: var(--muted);
   text-align: center;
   font-size: 12px;
+}
+
+.buy-cap-quote {
+  margin: 8px 0 4px;
+  color: var(--text-accent);
+  font-weight: 800;
+}
+
+.inline-copy-address {
+  max-width: 100%;
+  border: 0;
+  padding: 0;
+  color: var(--text-primary);
+  background: transparent;
+  font: inherit;
+  font-weight: 900;
+  text-align: left;
+  cursor: pointer;
+  word-break: break-all;
 }
 
 .token-balance {
