@@ -1290,8 +1290,11 @@ function drawTradeChart(project, backendCandles = null) {
   const top = max + padding;
   const bottom = Math.max(0, min - padding);
   const scaleY = (value) => chartBottom - ((value - bottom) / (top - bottom || 1)) * chartHeight;
-  const step = chartWidth / Math.max(1, candles.length);
-  const candleWidth = Math.max(3, Math.min(9, Math.floor(step * 0.62)));
+  const maxVisibleCandles = Math.max(1, Math.floor(chartWidth / 18));
+  const visibleCandles = candles.slice(-maxVisibleCandles);
+  const step = 18;
+  const candleWidth = 8;
+  const startX = Math.max(chartLeft, chartRight - (visibleCandles.length - 1) * step - candleWidth);
 
   const first = candles[0];
   const lastCandle = candles[candles.length - 1];
@@ -1320,8 +1323,8 @@ function drawTradeChart(project, backendCandles = null) {
     context.fillText(formatPrice(value), chartRight + 10, y + 4);
   }
 
-  candles.forEach((candle, index) => {
-    const x = chartLeft + index * step + Math.max(0, (step - candleWidth) / 2);
+  visibleCandles.forEach((candle, index) => {
+    const x = startX + index * step;
     const isUp = candle.close >= candle.open;
     const color = isUp ? chartGreen : chartRed;
     const centerX = x + candleWidth / 2;
@@ -1439,6 +1442,7 @@ async function estimateSwapReceive() {
         if (state.buyInputMode === "token") {
           const tokenAmount = ethers.parseEther(String(amount));
           const cost = await launchpad.quoteBuy(BigInt(project.projectId), tokenAmount);
+          $("#swapAmount").value = Number(ethers.formatEther(cost)).toFixed(6);
           $("#swapReceive").textContent = `预计支付: ${Number(ethers.formatEther(cost)).toFixed(6)} BNB`;
           return;
         }
@@ -1463,6 +1467,7 @@ async function estimateSwapReceive() {
     const price = Number(project.priceBnb || 0);
     if (state.buyInputMode === "token") {
       const estimatedCost = price > 0 ? amount * price : 0;
+      $("#swapAmount").value = estimatedCost > 0 ? estimatedCost.toFixed(6) : "";
       $("#swapReceive").textContent = `预计支付: ${estimatedCost.toFixed(6)} BNB`;
       return;
     }
@@ -1500,7 +1505,11 @@ async function updateBuyCapQuote(project = state.selectedProject) {
       : new ethers.JsonRpcProvider(config.rpcUrl || "https://bsc-dataseed.binance.org");
     const launchpad = getLaunchpadContract(provider);
     const cost = await launchpad.quoteBuy(BigInt(project.projectId), ethers.parseEther(String(capTokens)));
-    element.textContent = `${capTokens} 枚预计需要 ${Number(ethers.formatEther(cost)).toFixed(6)} BNB`;
+    const formattedCost = Number(ethers.formatEther(cost)).toFixed(6);
+    element.textContent = `${capTokens} 枚预计需要 ${formattedCost} BNB`;
+    if (state.swapSide === "buy" && state.buyInputMode === "token" && Number($("#buyTokenAmount").value || 0) === capTokens) {
+      $("#swapAmount").value = formattedCost;
+    }
   } catch {
     const estimated = Number(project.priceBnb || 0) * capTokens;
     element.textContent = `${capTokens} 枚预计需要 ${estimated > 0 ? estimated.toFixed(6) : "--"} BNB`;
@@ -1806,6 +1815,7 @@ async function refreshTradeData(project) {
 
 function openTradeModal(project) {
   state.selectedProject = project;
+  state.buyInputMode = "token";
   const avatarMarkup = project.avatarUrl
     ? `<img src="${project.avatarUrl}" alt="">`
     : project.avatar;
