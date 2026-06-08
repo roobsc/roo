@@ -43,6 +43,32 @@ npm start
 
 当前服务默认端口是 `4301`。如果正式部署前端和后端同域，可以把 `config.js` 里的 `apiBaseUrl` 留空；本地分端口运行时保持 `http://127.0.0.1:4301`。
 
+## Vercel 数据库存储和 K 线
+
+后端会优先使用 Vercel Marketplace/Neon/Supabase 等 Postgres 数据库；如果没有数据库环境变量，则回退到本地 `data/launchpad-db.json`。
+
+在 Vercel 项目里绑定数据库后，确认环境变量里有其中一个：
+
+```text
+POSTGRES_URL
+DATABASE_URL
+```
+
+部署到 Vercel 同域时，建议把 `config.js` 的 API 地址改成空字符串：
+
+```js
+apiBaseUrl: ""
+```
+
+交易 K 线的数据来源：
+
+- 内盘真实买入/卖出成功后，前端写入 `/api/trades`。
+- 后端把交易记录存入 Postgres 的 `trades` 表。
+- 交易弹窗打开时请求 `/api/candles?projectId=...&interval=1m`。
+- 后端按成交价 `priceBnb` 聚合 OHLCV，前端画出 K 线。
+
+支持的周期包括 `1m`、`5m`、`15m`、`1h`、`4h`、`1d`。新项目刚创建但还没有成交时，前端会显示模拟走势；有真实成交后会优先展示数据库 K 线。
+
 ## 链上创建配置
 
 1. 部署 `contracts/FourBscLaunchpad.sol`。

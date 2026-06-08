@@ -1,6 +1,7 @@
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
+const postgres = require("postgres");
 
 const root = __dirname;
 const port = Number(process.env.PORT || 4301);
@@ -10,6 +11,15 @@ const launchpadSourcePath = path.join(root, "contracts", "FourBscLaunchpad.sol")
 const launchpadTokenBinPath = path.join(root, "build-vanity", "contracts_FourBscLaunchpad_sol_LaunchpadToken.bin");
 const bscscanApiUrl = process.env.BSCSCAN_API_URL || "https://api.etherscan.io/v2/api";
 const bscscanApiKey = process.env.BSCSCAN_API_KEY || "";
+const postgresUrl = process.env.POSTGRES_URL || process.env.DATABASE_URL || "";
+const sql = postgresUrl
+  ? postgres(postgresUrl, {
+      ssl: postgresUrl.includes("sslmode=disable") ? false : "require",
+      max: 3,
+      idle_timeout: 20
+    })
+  : null;
+let schemaReady = false;
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -43,6 +53,207 @@ function readDb() {
 function writeDb(db) {
   ensureDb();
   fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
+}
+
+async function ensureSchema() {
+  if (!sql || schemaReady) {
+    return;
+  }
+  await sql`
+    create table if not exists projects (
+      project_key text primary key,
+      project_id text,
+      contract text,
+      data jsonb not null,
+      market_cap numeric default 0,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    )
+  `;
+  await sql`create index if not exists projects_market_cap_idx on projects (market_cap desc)`;
+  await sql`create index if not exists projects_contract_idx on projects (lower(contract))`;
+  await sql`
+    create table if not exists trades (
+      id text primary key,
+      project_id text,
+      token text,
+      symbol text,
+      account text,
+      side text,
+      tx_hash text,
+      bnb_amount numeric,
+      token_amount numeric,
+      price_bnb numeric,
+      usd_amount numeric,
+      timestamp_ms bigint not null,
+      data jsonb not null,
+      created_at timestamptz not null default now()
+    )
+  `;
+  await sql`create index if not exists trades_project_time_idx on trades (project_id, timestamp_ms)`;
+  await sql`create index if not exists trades_token_time_idx on trades (lower(token), timestamp_ms)`;
+  schemaReady = true;
+}
+
+function normalizeProject(project) {
+  return {
+    ...project,
+    updatedAt: new Date().toISOString(),
+    createdAt: project.createdAt || new Date().toISOString()
+  };
+}
+
+async function getProjectsStore() {
+  if (!sql) {
+    const db = readDb();
+    return db.projects
+      .slice()
+      .sort((a, b) => Number(b.marketCap || 0) - Number(a.marketCap || 0));
+  }
+  await ensureSchema();
+  const rows = await sql`
+    select data
+    from projects
+    order by market_cap desc nulls last, updated_at desc
+  `;
+  return rows.map((row) => row.data);
+}
+
+async function upsertProjectStore(project) {
+  if (!sql) {
+    const db = readDb();
+    const saved = upsertProject(db, project);
+    writeDb(db);
+    return saved;
+  }
+  await ensureSchema();
+  const saved = normalizeProject(project);
+  const key = getProjectKey(saved);
+  await sql`
+    insert into projects (project_key, project_id, contract, data, market_cap, created_at, updated_at)
+    values (
+      ${key},
+      ${saved.projectId === undefined || saved.projectId === null ? null : String(saved.projectId)},
+      ${saved.contract || null},
+      ${sql.json(saved)},
+      ${Number(saved.marketCap || 0)},
+      ${saved.createdAt},
+      now()
+    )
+    on conflict (project_key) do update set
+      project_id = excluded.project_id,
+      contract = excluded.contract,
+      data = projects.data || excluded.data,
+      market_cap = excluded.market_cap,
+      updated_at = now()
+  `;
+  return saved;
+}
+
+async function getTradesStore(projectId) {
+  if (!sql) {
+    const db = readDb();
+    return db.trades
+      .filter((trade) => String(trade.projectId) === String(projectId))
+      .sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
+  }
+  await ensureSchema();
+  const rows = await sql`
+    select data
+    from trades
+    where project_id = ${String(projectId || "")}
+    order by timestamp_ms desc
+    limit 300
+  `;
+  return rows.map((row) => row.data);
+}
+
+async function saveTradeStore(trade) {
+  const saved = {
+    ...trade,
+    id: trade.id || `${trade.txHash || "tx"}-${Date.now()}`,
+    timestamp: trade.timestamp || Date.now()
+  };
+  if (!sql) {
+    const db = readDb();
+    db.trades.push(saved);
+    writeDb(db);
+    return saved;
+  }
+  await ensureSchema();
+  await sql`
+    insert into trades (
+      id, project_id, token, symbol, account, side, tx_hash,
+      bnb_amount, token_amount, price_bnb, usd_amount, timestamp_ms, data
+    )
+    values (
+      ${saved.id},
+      ${saved.projectId === undefined || saved.projectId === null ? null : String(saved.projectId)},
+      ${saved.token || null},
+      ${saved.symbol || null},
+      ${saved.account || null},
+      ${saved.side || null},
+      ${saved.txHash || null},
+      ${Number(saved.bnbAmount || 0)},
+      ${Number(saved.tokenAmount || 0)},
+      ${Number(saved.priceBnb || 0)},
+      ${Number(saved.usdAmount || 0)},
+      ${Number(saved.timestamp || Date.now())},
+      ${sql.json(saved)}
+    )
+    on conflict (id) do update set data = excluded.data
+  `;
+  return saved;
+}
+
+async function getCandlesStore(projectId, interval) {
+  if (!sql) {
+    const db = readDb();
+    const trades = db.trades
+      .filter((trade) => String(trade.projectId) === String(projectId))
+      .sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0));
+    return buildCandles(trades, interval);
+  }
+  await ensureSchema();
+  const bucketMs = intervalToMs(interval);
+  const rows = await sql`
+    with ordered as (
+      select
+        floor(timestamp_ms / ${bucketMs}) * ${bucketMs} as bucket,
+        timestamp_ms,
+        price_bnb::float8 as price,
+        bnb_amount::float8 as volume
+      from trades
+      where project_id = ${String(projectId || "")}
+        and price_bnb > 0
+    ),
+    ranked as (
+      select
+        *,
+        first_value(price) over (partition by bucket order by timestamp_ms asc) as open,
+        first_value(price) over (partition by bucket order by timestamp_ms desc) as close
+      from ordered
+    )
+    select
+      bucket::bigint as time,
+      min(open)::float8 as open,
+      max(price)::float8 as high,
+      min(price)::float8 as low,
+      min(close)::float8 as close,
+      sum(volume)::float8 as volume
+    from ranked
+    group by bucket
+    order by bucket asc
+    limit 500
+  `;
+  return rows.map((row) => ({
+    time: Number(row.time),
+    open: Number(row.open),
+    high: Number(row.high),
+    low: Number(row.low),
+    close: Number(row.close),
+    volume: Number(row.volume || 0)
+  }));
 }
 
 function send(res, status, body, headers = {}) {
@@ -325,49 +536,34 @@ async function checkVerificationStatus(args) {
 }
 
 async function handleApi(req, res, url) {
-  const db = readDb();
-
   if (req.method === "GET" && url.pathname === "/api/projects") {
-    const projects = db.projects
-      .slice()
-      .sort((a, b) => Number(b.marketCap || 0) - Number(a.marketCap || 0));
+    const projects = await getProjectsStore();
     return sendJson(res, 200, { projects });
   }
 
   if (req.method === "POST" && url.pathname === "/api/projects/upsert") {
     const project = await readJsonBody(req);
-    const saved = upsertProject(db, project);
-    writeDb(db);
+    const saved = await upsertProjectStore(project);
     return sendJson(res, 200, { project: saved });
   }
 
   if (req.method === "GET" && url.pathname === "/api/trades") {
     const projectId = url.searchParams.get("projectId");
-    const trades = db.trades
-      .filter((trade) => String(trade.projectId) === String(projectId))
-      .sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
+    const trades = await getTradesStore(projectId);
     return sendJson(res, 200, { trades });
   }
 
   if (req.method === "POST" && url.pathname === "/api/trades") {
     const trade = await readJsonBody(req);
-    const saved = {
-      ...trade,
-      id: trade.id || `${trade.txHash || "tx"}-${Date.now()}`,
-      timestamp: trade.timestamp || Date.now()
-    };
-    db.trades.push(saved);
-    writeDb(db);
+    const saved = await saveTradeStore(trade);
     return sendJson(res, 200, { trade: saved });
   }
 
   if (req.method === "GET" && url.pathname === "/api/candles") {
     const projectId = url.searchParams.get("projectId");
     const interval = url.searchParams.get("interval") || "1m";
-    const trades = db.trades
-      .filter((trade) => String(trade.projectId) === String(projectId))
-      .sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0));
-    return sendJson(res, 200, { candles: buildCandles(trades, interval) });
+    const candles = await getCandlesStore(projectId, interval);
+    return sendJson(res, 200, { candles });
   }
 
   if (req.method === "POST" && url.pathname === "/api/verify-token") {
@@ -443,7 +639,7 @@ function serveStatic(req, res, url) {
   });
 }
 
-const server = http.createServer(async (req, res) => {
+async function requestHandler(req, res) {
   const url = new URL(req.url || "/", `http://${req.headers.host || "127.0.0.1"}`);
   try {
     if (req.method === "OPTIONS") {
@@ -458,8 +654,13 @@ const server = http.createServer(async (req, res) => {
   } catch (error) {
     sendJson(res, 500, { error: error.message || "Server error" });
   }
-});
+}
 
-server.listen(port, "127.0.0.1", () => {
-  console.log(`roo launchpad running at http://127.0.0.1:${port}`);
-});
+if (require.main === module) {
+  const server = http.createServer(requestHandler);
+  server.listen(port, "127.0.0.1", () => {
+    console.log(`roo launchpad running at http://127.0.0.1:${port}`);
+  });
+}
+
+module.exports = requestHandler;
