@@ -1770,9 +1770,9 @@ select {
   align-items: center;
   gap: 12px;
   padding: 10px 20px;
-  border-top: 1px solid rgba(0, 240, 255, 0.1);
-  border-bottom: 1px solid rgba(0, 240, 255, 0.1);
-  background: var(--bg-elevated);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: #202020;
 }
 
 .chart-toolbar button {
@@ -1784,7 +1784,7 @@ select {
 }
 
 .chart-toolbar button.active {
-  color: var(--text-accent);
+  color: #37ff14;
 }
 
 .chart-toolbar span {
@@ -1795,7 +1795,7 @@ select {
   position: relative;
   min-height: 360px;
   overflow: hidden;
-  background: #0e1017;
+  background: #171717;
 }
 
 .roo-chart canvas {
@@ -1815,8 +1815,8 @@ select {
   gap: 10px;
   width: 48px;
   padding: 12px 8px;
-  background: rgba(17, 19, 26, 0.84);
-  border-right: 1px solid rgba(0, 240, 255, 0.12);
+  background: rgba(13, 14, 17, 0.88);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .chart-tools button {
@@ -1831,10 +1831,11 @@ select {
   right: 0;
   top: 61%;
   padding: 4px 8px;
-  color: #fff;
-  background: #ff4f3f;
+  color: #111;
+  background: #37ff14;
   font-size: 12px;
   font-weight: 900;
+  box-shadow: 0 0 12px rgba(55, 255, 20, 0.22);
 }
 
 .trade-tabs {

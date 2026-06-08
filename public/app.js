@@ -459,7 +459,16 @@ function getProjectStage(launched, progress) {
   return "new";
 }
 
-async function buildProjectFromChain(projectId, basics, provider) {
+async function readCurrentPriceBnb(projectId, launchpad, fallbackPrice = 0) {
+  try {
+    const oneTokenCost = await launchpad.quoteBuy(BigInt(projectId), ethers.parseEther("1"));
+    return Number(ethers.formatEther(oneTokenCost));
+  } catch {
+    return Number(fallbackPrice || 0);
+  }
+}
+
+async function buildProjectFromChain(projectId, basics, provider, launchpadContract = null) {
   const token = new ethers.Contract(basics.token, ERC20_ABI, provider);
   let name = `Project ${projectId}`;
   let symbol = `P${projectId}`;
@@ -471,7 +480,9 @@ async function buildProjectFromChain(projectId, basics, provider) {
   const launchThreshold = Number(ethers.formatEther(basics.launchThreshold || 0n));
   const bnbRaised = Number(ethers.formatEther(basics.bnbRaised || 0n));
   const tokensSold = Number(ethers.formatEther(basics.tokensSold || 0n));
-  const priceBnb = tokensSold > 0 ? bnbRaised / tokensSold : 0;
+  const averagePriceBnb = tokensSold > 0 ? bnbRaised / tokensSold : 0;
+  const launchpad = launchpadContract || getLaunchpadContract(provider);
+  const priceBnb = await readCurrentPriceBnb(projectId, launchpad, averagePriceBnb);
   const marketCap = priceBnb > 0 ? priceBnb * 10_000 * 600 : bnbRaised * 600;
   const progress = launchThreshold > 0
     ? Math.min(100, Number(((bnbRaised / launchThreshold) * 100).toFixed(3)))
@@ -515,7 +526,7 @@ async function syncChainProjects(limit = 120) {
     for (let projectId = count - 1; projectId >= start; projectId -= 1) {
       try {
         const basics = await launchpad.getProjectBasics(BigInt(projectId));
-        const chainProject = await buildProjectFromChain(projectId, basics, provider);
+        const chainProject = await buildProjectFromChain(projectId, basics, provider, launchpad);
         upsertLocalProject(chainProject);
       } catch {
         // Keep syncing the rest even if one historical project cannot be read.
@@ -561,7 +572,8 @@ async function findProjectByTokenAddress(tokenAddress) {
     const launchThreshold = Number(ethers.formatEther(basics.launchThreshold || 0n));
     const bnbRaised = Number(ethers.formatEther(basics.bnbRaised || 0n));
     const tokensSold = Number(ethers.formatEther(basics.tokensSold || 0n));
-    const priceBnb = tokensSold > 0 ? bnbRaised / tokensSold : 0;
+    const averagePriceBnb = tokensSold > 0 ? bnbRaised / tokensSold : 0;
+    const priceBnb = await readCurrentPriceBnb(projectId, launchpad, averagePriceBnb);
     const marketCap = priceBnb > 0 ? priceBnb * 10_000 * 600 : bnbRaised * 600;
     const progress = launchThreshold > 0 ? Math.min(100, Number(((bnbRaised / launchThreshold) * 100).toFixed(3))) : 0;
     return upsertLocalProject({
@@ -1217,46 +1229,86 @@ function drawTradeChart(project, backendCandles = null) {
   const canvas = $("#tradeChart");
   const context = canvas.getContext("2d");
   const { width, height } = canvas;
+  const chartLeft = 54;
+  const chartRight = width - 84;
+  const chartTop = 38;
+  const chartBottom = height - 34;
+  const chartWidth = chartRight - chartLeft;
+  const chartHeight = chartBottom - chartTop;
+  const formatPrice = (value) => Number(value || 0).toFixed(8).replace(/0+$/, "").replace(/\.$/, "");
+
   context.clearRect(0, 0, width, height);
-  context.fillStyle = "#0e1017";
+  context.fillStyle = "#171717";
   context.fillRect(0, 0, width, height);
 
-  context.strokeStyle = "rgba(0, 240, 255, 0.08)";
+  context.strokeStyle = "rgba(255, 255, 255, 0.075)";
   context.lineWidth = 1;
-  for (let x = 72; x < width; x += 96) {
+  for (let i = 0; i <= 8; i += 1) {
+    const x = chartLeft + (chartWidth * i) / 8;
     context.beginPath();
-    context.moveTo(x, 0);
-    context.lineTo(x, height);
+    context.moveTo(x, chartTop);
+    context.lineTo(x, chartBottom);
     context.stroke();
   }
-  for (let y = 40; y < height; y += 54) {
+  for (let i = 0; i <= 5; i += 1) {
+    const y = chartTop + (chartHeight * i) / 5;
     context.beginPath();
-    context.moveTo(0, y);
-    context.lineTo(width, y);
+    context.moveTo(chartLeft, y);
+    context.lineTo(chartRight, y);
     context.stroke();
   }
 
   const candles = backendCandles || [];
   if (!candles.length) {
-    context.fillStyle = "#00f0ff";
+    context.fillStyle = "#37ff14";
     context.font = "16px sans-serif";
-    context.fillText("暂无真实成交 K 线", 54, 64);
+    context.fillText("暂无真实成交 K 线", chartLeft + 14, chartTop + 28);
     $("#chartPriceTag").textContent = "--";
+    $("#chartPriceTag").style.top = "50%";
     return;
   }
+
   const max = Math.max(...candles.map((candle) => candle.high));
   const min = Math.min(...candles.map((candle) => candle.low));
   const range = max - min;
   const padding = range === 0 ? Math.max(max * 0.08, 0.00000001) : range * 0.12;
   const top = max + padding;
   const bottom = Math.max(0, min - padding);
-  const scaleY = (value) => height - 32 - ((value - bottom) / (top - bottom || 1)) * (height - 64);
-  const candleWidth = Math.max(4, Math.floor((width - 90) / candles.length) - 3);
+  const scaleY = (value) => chartBottom - ((value - bottom) / (top - bottom || 1)) * chartHeight;
+  const step = chartWidth / Math.max(1, candles.length);
+  const candleWidth = Math.max(3, Math.min(9, Math.floor(step * 0.62)));
+
+  const first = candles[0];
+  const lastCandle = candles[candles.length - 1];
+  const change = first.open > 0 ? ((lastCandle.close - first.open) / first.open) * 100 : 0;
+  const volume = candles.reduce((sum, candle) => sum + Number(candle.volume || 0), 0);
+  const chartGreen = "#37ff14";
+  const chartRed = "#ff3b30";
+  const trendColor = change >= 0 ? chartGreen : chartRed;
+
+  context.fillStyle = trendColor;
+  context.font = "12px 'Segoe UI', sans-serif";
+  context.beginPath();
+  context.arc(22, 20, 5, 0, Math.PI * 2);
+  context.fill();
+  context.fillText(
+    `开 ${formatPrice(lastCandle.open)}  高 ${formatPrice(lastCandle.high)}  低 ${formatPrice(lastCandle.low)}  收 ${formatPrice(lastCandle.close)}   ${volume.toFixed(6)} (${change >= 0 ? "+" : ""}${change.toFixed(2)}%)`,
+    48,
+    24
+  );
+
+  context.fillStyle = "rgba(255, 255, 255, 0.72)";
+  context.font = "12px 'Segoe UI', sans-serif";
+  for (let i = 0; i <= 5; i += 1) {
+    const value = top - ((top - bottom) * i) / 5;
+    const y = scaleY(value);
+    context.fillText(formatPrice(value), chartRight + 10, y + 4);
+  }
 
   candles.forEach((candle, index) => {
-    const x = 54 + index * ((width - 90) / candles.length);
+    const x = chartLeft + index * step + Math.max(0, (step - candleWidth) / 2);
     const isUp = candle.close >= candle.open;
-    const color = isUp ? "#00f0ff" : "#ff4f8b";
+    const color = isUp ? chartGreen : chartRed;
     context.strokeStyle = color;
     context.fillStyle = color;
     context.beginPath();
@@ -1270,14 +1322,17 @@ function drawTradeChart(project, backendCandles = null) {
 
   const last = candles[candles.length - 1].close;
   const y = scaleY(last);
-  context.setLineDash([3, 4]);
-  context.strokeStyle = "rgba(0, 240, 255, 0.75)";
+  context.setLineDash([2, 3]);
+  context.strokeStyle = `${trendColor}cc`;
   context.beginPath();
-  context.moveTo(0, y);
-  context.lineTo(width, y);
+  context.moveTo(chartLeft, y);
+  context.lineTo(chartRight, y);
   context.stroke();
   context.setLineDash([]);
-  $("#chartPriceTag").textContent = last.toFixed(6);
+  $("#chartPriceTag").textContent = formatPrice(last);
+  $("#chartPriceTag").style.top = `${Math.max(chartTop + 4, Math.min(chartBottom - 18, y - 10))}px`;
+  $("#chartPriceTag").style.background = trendColor;
+  $("#chartPriceTag").style.color = "#111";
 }
 
 function renderTradeTable(project, backendTrades = null) {

@@ -127,7 +127,7 @@ contract LaunchpadToken {
  * - Fixed project supply: 10,000 tokens.
  * - Creator chooses one-wallet buy cap from 1 to 100 tokens.
  * - Creator chooses manual launch threshold from 0.05 to 8 BNB in testing mode.
- * - Internal market buy/sell charges 1% platform BNB tax.
+ * - Internal market buy/sell uses an increasing bonding curve and charges 1% platform BNB tax.
  * - After launch, platform tax is disabled and LP tokens are sent to burn address.
  * - Project mechanism tax pays marketing in BNB, auto-pays holder dividends, and returns LP tax to the pool.
  * - Burn allocation reduces token supply instead of sending project tokens to wallets.
@@ -140,6 +140,8 @@ contract FourBscLaunchpad {
     uint256 public constant MAX_LAUNCH_THRESHOLD = 8 ether;
     uint16 public constant PLATFORM_TAX_BPS = 100;
     uint16 public constant BPS_DENOMINATOR = 10_000;
+    uint16 public constant CURVE_BASE_BPS = 5_000;
+    uint16 public constant CURVE_SLOPE_BPS = 20_000;
     uint16 public constant MIN_PROJECT_TAX_BPS = 100;
     uint16 public constant MAX_PROJECT_TAX_BPS = 1_000;
     uint256 public constant MIN_DIVIDEND_HOLDING = 1 ether;
@@ -561,12 +563,40 @@ contract FourBscLaunchpad {
     function quoteBuy(uint256 projectId, uint256 tokenAmount) public view projectExists(projectId) returns (uint256) {
         Project storage project = projects[projectId];
         uint256 taxBps = PLATFORM_TAX_BPS + _bnbProjectTaxBps(project);
-        return (tokenAmount * project.launchThreshold * BPS_DENOMINATOR) / (TOKEN_SUPPLY * (BPS_DENOMINATOR - taxBps));
+        uint256 poolAmount = _curvePoolAmount(project.launchThreshold, project.tokensSold, tokenAmount);
+        return _ceilDiv(poolAmount * BPS_DENOMINATOR, BPS_DENOMINATOR - taxBps);
     }
 
     function quoteSell(uint256 projectId, uint256 tokenAmount) public view projectExists(projectId) returns (uint256) {
         Project storage project = projects[projectId];
-        return (tokenAmount * project.launchThreshold) / TOKEN_SUPPLY;
+        require(tokenAmount <= project.tokensSold, "LAUNCHPAD: sell amount");
+        return _curvePoolAmount(project.launchThreshold, project.tokensSold - tokenAmount, tokenAmount);
+    }
+
+    function _curvePoolAmount(
+        uint256 launchThreshold,
+        uint256 startSold,
+        uint256 tokenAmount
+    ) private pure returns (uint256) {
+        if (tokenAmount == 0) {
+            return 0;
+        }
+        uint256 endSold = startSold + tokenAmount;
+        require(endSold <= TOKEN_SUPPLY, "LAUNCHPAD: sold out");
+
+        uint256 baseAmount =
+            (tokenAmount * launchThreshold * CURVE_BASE_BPS) /
+            (TOKEN_SUPPLY * BPS_DENOMINATOR);
+        uint256 area = (endSold * endSold) - (startSold * startSold);
+        uint256 slopeAmount =
+            (launchThreshold * CURVE_SLOPE_BPS * area) /
+            (2 * TOKEN_SUPPLY * TOKEN_SUPPLY * BPS_DENOMINATOR);
+
+        return baseAmount + slopeAmount;
+    }
+
+    function _ceilDiv(uint256 numerator, uint256 denominator) private pure returns (uint256) {
+        return numerator == 0 ? 0 : ((numerator - 1) / denominator) + 1;
     }
 
     function getProjectBasics(uint256 projectId) external view projectExists(projectId) returns (
