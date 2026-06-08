@@ -2667,6 +2667,7 @@ select {
 
   .trade-modal {
     padding: 10px;
+    align-items: start;
   }
 
   .trade-dialog {
@@ -2676,6 +2677,9 @@ select {
 
   .trade-layout {
     padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
   }
 
   .trade-token-head,
@@ -2685,6 +2689,34 @@ select {
 
   .trade-side {
     order: -1;
+    width: 100%;
+  }
+
+  .swap-panel {
+    padding: 16px;
+  }
+
+  .swap-tabs {
+    margin: 18px 0 12px;
+  }
+
+  .swap-tabs button,
+  .quick-amounts button,
+  .sell-percentages button {
+    padding: 10px;
+  }
+
+  .swap-input {
+    padding: 10px 12px;
+  }
+
+  .swap-input input {
+    font-size: 18px;
+  }
+
+  .swap-submit {
+    padding: 14px;
+    font-size: 15px;
   }
 
   .bonding-panel,
@@ -2694,6 +2726,7 @@ select {
 
   .trade-main {
     overflow: hidden;
+    order: 2;
   }
 
   .trade-token-head,
@@ -2704,24 +2737,24 @@ select {
   }
 
   .trade-tabs {
-    padding: 14px 16px 0;
-    gap: 26px;
+    padding: 14px 12px 0;
+    gap: 22px;
   }
 
   .trade-table {
-    padding: 0 12px 14px;
+    padding: 0 8px 12px;
+    overflow-x: auto;
   }
 
   .trade-row {
-    grid-template-columns: minmax(0, 1.3fr) minmax(82px, 0.8fr) minmax(78px, 0.8fr);
-    gap: 10px;
-    padding: 12px 10px;
-    font-size: 13px;
+    grid-template-columns: minmax(112px, 1fr) minmax(92px, 0.8fr) minmax(86px, 0.8fr);
+    min-width: 330px;
+    gap: 8px;
+    padding: 10px 8px;
+    font-size: 12px;
   }
 
   .trade-row span:nth-child(2),
-  .trade-row span:nth-child(4),
-  .trade-row span:nth-child(6),
   .trade-row strong:nth-child(2),
   .trade-row strong:nth-child(4),
   .trade-row button {
@@ -2729,10 +2762,10 @@ select {
   }
 
   .trade-row:not(.trade-row-head) {
-    min-height: 54px;
-    margin-top: 10px;
-    border-left: 3px solid rgba(0, 240, 255, 0.32);
-    border-radius: 12px;
+    min-height: 42px;
+    margin-top: 6px;
+    border-left: 2px solid rgba(0, 240, 255, 0.32);
+    border-radius: 10px;
   }
 
   .trade-price-box {
