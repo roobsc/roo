@@ -300,6 +300,7 @@ const state = {
   language: "zh",
   listedOnly: false,
   selectedProject: null,
+  tradeView: "chart",
   swapSide: "buy",
   buyInputMode: "bnb",
   mevProtection: false,
@@ -1791,9 +1792,45 @@ function updateTradeStats(project, trades = []) {
   $("#bondingText").innerHTML = `联合曲线中仍有 <strong>${remaining.toLocaleString(undefined, { maximumFractionDigits: 3 })} ${project.symbol}</strong> 可供出售；当前底池 <strong>${project.raised}</strong>。`;
 }
 
+function setTradeView(view) {
+  state.tradeView = view || "chart";
+  const modal = $("#tradeModal");
+  modal.dataset.tradeView = state.tradeView;
+  $$("[data-trade-view]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.tradeView === state.tradeView);
+  });
+}
+
+function renderHolderList(project, trades = []) {
+  const holderMap = new Map();
+  trades.forEach((trade) => {
+    const account = normalizeAddress(trade.account);
+    if (!account) {
+      return;
+    }
+    const current = holderMap.get(account) || { account: trade.account, amount: 0 };
+    const delta = Number(trade.tokenAmount || 0) * (trade.side === "sell" ? -1 : 1);
+    current.amount += delta;
+    holderMap.set(account, current);
+  });
+  const holders = Array.from(holderMap.values())
+    .filter((holder) => holder.amount > 0.000001)
+    .sort((a, b) => b.amount - a.amount);
+  $("#holderCountText").textContent = String(holders.length);
+  $("#holderList").innerHTML = holders.length
+    ? holders.slice(0, 20).map((holder) => `
+      <div class="holder-row">
+        <span>${shortAddress(holder.account)}</span>
+        <strong>${holder.amount.toFixed(6)} ${project.symbol}</strong>
+      </div>
+    `).join("")
+    : `<span>暂无持币地址</span>`;
+}
+
 async function refreshTradeData(project) {
   if (!project || project.projectId === undefined || project.projectId === null) {
     renderTradeTable(project);
+    renderHolderList(project || { symbol: "" }, []);
     drawTradeChart(project);
     return;
   }
@@ -1805,10 +1842,12 @@ async function refreshTradeData(project) {
     const trades = tradesData.trades || [];
     const candles = (candlesData.candles || []).length ? candlesData.candles : buildCandlesFromTrades(trades);
     renderTradeTable(project, trades);
+    renderHolderList(project, trades);
     updateTradeStats(project, trades);
     drawTradeChart(project, candles);
   } catch {
     renderTradeTable(project);
+    renderHolderList(project, []);
     drawTradeChart(project);
   }
 }
@@ -1816,6 +1855,7 @@ async function refreshTradeData(project) {
 function openTradeModal(project) {
   state.selectedProject = project;
   state.buyInputMode = "token";
+  setTradeView(window.matchMedia("(max-width: 840px)").matches ? "swap" : "chart");
   const avatarMarkup = project.avatarUrl
     ? `<img src="${project.avatarUrl}" alt="">`
     : project.avatar;
@@ -2361,6 +2401,15 @@ function bindEvents() {
   $$(".tab").forEach((tab) => {
     tab.addEventListener("click", () => updateTabs(tab.dataset.tab));
   });
+  $$(".top-menu-panel [data-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      updateTabs(button.dataset.tab);
+      const menu = button.closest("details");
+      if (menu) {
+        menu.open = false;
+      }
+    });
+  });
 
   $("#menuButton").addEventListener("click", openMenu);
   $$("[data-close-menu]").forEach((button) => {
@@ -2525,6 +2574,9 @@ function bindEvents() {
 
   $$(".swap-tabs button").forEach((button) => {
     button.addEventListener("click", () => setSwapSide(button.dataset.swapSide));
+  });
+  $$("[data-trade-view]").forEach((button) => {
+    button.addEventListener("click", () => setTradeView(button.dataset.tradeView));
   });
 
   $("#swapAmount").addEventListener("input", () => {

@@ -65,6 +65,10 @@
         </nav>
 
         <div class="top-actions">
+          <div class="language-toggle top-language" aria-label="Language">
+            <button type="button" data-lang="en">EN</button>
+            <button class="active" type="button" data-lang="zh">中文</button>
+          </div>
           <details class="top-menu">
             <summary>•••</summary>
             <div class="top-menu-panel">
@@ -526,6 +530,11 @@
         <button class="trade-close" type="button" data-close-trade aria-label="关闭交易">×</button>
 
         <div class="trade-layout">
+          <nav class="trade-section-tabs" aria-label="Trade views">
+            <button class="active" type="button" data-trade-view="info">信息</button>
+            <button type="button" data-trade-view="chart">图表</button>
+            <button type="button" data-trade-view="swap">买/卖</button>
+          </nav>
           <section class="trade-main">
             <div class="trade-token-head">
               <div class="trade-token-id">
@@ -656,6 +665,15 @@
                 </div>
               </div>
               <p id="infoDescription">使用 roo 的暖色交易面板查看内盘走势、买卖和发射进度。</p>
+            </section>
+            <section class="holder-panel">
+              <div class="holder-head">
+                <h3>持币地址</h3>
+                <span id="holderCountText">0</span>
+              </div>
+              <div id="holderList" class="holder-list">
+                <span>暂无持币地址</span>
+              </div>
             </section>
           </aside>
         </div>
