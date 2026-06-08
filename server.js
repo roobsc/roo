@@ -494,7 +494,7 @@ function findVanitySalt(args) {
   }
   const maxAttempts = Math.min(Number(args.maxAttempts || 240000), 1_000_000);
   const seed = `${args.creator}:${args.tokenName}:${args.tokenSymbol}:${Date.now()}:${Math.random()}`;
-  const initCodeHash = getLaunchpadTokenInitCodeHash(args);
+  const initCodeHash = args.initCodeHash || getLaunchpadTokenInitCodeHash(args);
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const userSalt = ethers.keccak256(ethers.toUtf8Bytes(`${seed}:${attempt}`));
@@ -644,6 +644,7 @@ async function handleApi(req, res, url) {
       tokenName: payload.tokenName,
       tokenSymbol: payload.tokenSymbol,
       supply: payload.supply || "10000000000000000000000",
+      initCodeHash: payload.initCodeHash || "",
       suffix: payload.suffix || "0000",
       maxAttempts: payload.maxAttempts || 240000
     });

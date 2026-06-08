@@ -99,6 +99,16 @@ const LAUNCHPAD_ABI = [
     type: "function"
   },
   {
+    inputs: [
+      { name: "tokenName", type: "string" },
+      { name: "tokenSymbol", type: "string" }
+    ],
+    name: "launchpadTokenInitCodeHash",
+    outputs: [{ name: "", type: "bytes32" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
     anonymous: false,
     inputs: [
       { indexed: true, name: "projectId", type: "uint256" },
@@ -323,7 +333,7 @@ function clampNumber(value, min, max) {
 function compactLink(url) {
   const value = url.trim();
   if (!value) {
-    return "未填写";
+    return t("notFilled");
   }
   try {
     const parsed = new URL(value);
@@ -658,7 +668,17 @@ function renderProjects() {
   }
   const visibleProjects = getVisibleProjects();
   if (visibleProjects.length === 0) {
-    list.innerHTML = `<div class="empty-market">${t("emptyProjects")}</div>`;
+    list.innerHTML = `
+      <div class="empty-market empty-market-rich">
+        <div class="empty-illustration" aria-hidden="true">🪹</div>
+        <h2>袋鼠仓还是空的</h2>
+        <p>成为第一个发射项目的人，前 3 个项目可获平台流量扶持。</p>
+        <div class="empty-actions">
+          <button class="primary-action" type="button" data-open-create>✨ 创建首个项目</button>
+          <button class="ghost-action" type="button" data-empty-refresh>🔄 刷新历史数据</button>
+        </div>
+      </div>
+    `;
     return;
   }
   list.innerHTML = visibleProjects.map((project) => `
@@ -759,6 +779,84 @@ const translations = {
     connectWallet: "连接钱包",
     walletMissing: "未检测到钱包",
     walletNotConnected: "未连接",
+    notFilled: "未填写",
+    createEyebrow: "Create BSC Project",
+    createTitle: "创建限购发射项目",
+    updatePreview: "更新预览",
+    projectAvatar: "项目头像",
+    avatarSupport: "支持 PNG / JPG / WEBP",
+    uploadAvatar: "上传项目头像",
+    noImageSelected: "未选择图片",
+    avatarHelp: "创建项目时可以带上头像，预览卡片会同步展示。",
+    projectName: "项目名称",
+    tokenSymbol: "代币符号",
+    launchPoolBnb: "发射底池 BNB",
+    socialInfo: "社媒信息",
+    socialHelp: "创建页同步收集",
+    website: "网站",
+    walletCapTitle: "单钱包限购",
+    enableWalletCap: "启用限购",
+    walletCapSteps: "限购阶梯",
+    tokensPerWallet: "枚 / 钱包",
+    manualWalletCap: "手动限购 1-100 枚",
+    tokenUnit: "枚",
+    noWalletCap: "不限购",
+    launchThresholdTitle: "发射阈值",
+    projectTax: "项目税收",
+    enableTax: "启用税收",
+    taxNote: "关闭时项目不收机制税；启用后可设置 1%-10% 税率，营销收 BNB，分红自动发给达到 1 枚的持币者，LP 回流自动进入项目池。",
+    marketingWallet: "营销钱包",
+    marketingWalletHelp: "启用税收后才需要填写；留空自动使用当前连接钱包",
+    marketingWalletBnb: "营销钱包（收 BNB）",
+    marketingWalletPlaceholder: "营销收款钱包地址 0x...",
+    taxRate: "税率",
+    manualTaxRate: "手动税率 1-10%",
+    taxAllocation: "税收分配",
+    taxTotalLabel: "总计：",
+    taxRemainLabel: "未分配：",
+    taxFull: "分配已满 100%。",
+    taxInvalid: "当前分配为 {total}%，需要刚好等于 100%。",
+    taxMarketingRow: "营销钱包（营销、捐赠等，BNB）",
+    taxBurnRow: "销毁（减少供应量）",
+    taxRewardRow: "持币分红（>= 1 枚自动收 BNB）",
+    taxLpRow: "回流 LP（BNB 自动进项目池）",
+    summarySupply: "总供应量",
+    summaryWalletCap: "单钱包限购",
+    summaryLaunchPool: "发射底池",
+    summaryLpDestination: "LP 去向",
+    createParams: "创建参数",
+    copy: "复制",
+    copied: "已复制",
+    createInitialStatus: "点击后会连接钱包、调用发射台合约并提交创建交易。",
+    submitPending: "提交中...",
+    createConnectStatus: "正在连接钱包并检查 BSC 网络...",
+    createReadVanityStatus: "正在读取发射台合约规则...",
+    createGenerateAddressStatus: "正在生成合约代币地址...",
+    createVerifyAddressStatus: "已找到候选地址：{address}，正在链上校验合约代币地址...",
+    createConfirmTxStatus: "链上确认预测地址：{address}，正在唤起钱包确认创建交易。",
+    createSubmittedStatus: "交易已提交：{hash}，正在等待链上确认...",
+    createSaveAvatarStatus: "创建成功：Project #{id}。正在保存项目头像...",
+    createVerifySourceStatus: "创建成功：Project #{id}，代币 {token}。正在自动开源...",
+    createVerifiedStatus: "创建成功：Project #{id}，代币 {token}。{message}",
+    createConfirmedNoEventStatus: "交易已确认：{hash}。未解析到 ProjectCreated 事件，请到 BscScan 查看详情。",
+    createFailedStatus: "创建交易失败，请检查钱包弹窗和参数。",
+    createPreviewUpdated: "预览已更新，确认无误后点击“创建代币”。",
+    walletReadyStatus: "钱包已连接，可以创建代币。",
+    walletConnectFailed: "连接钱包失败。",
+    networkSwitchFailed: "切换 BSC 网络失败。",
+    avatarTypeError: "头像只支持 PNG、JPG、WebP 格式。",
+    avatarSizeError: "头像需要小于 2MB，请压缩后再上传。",
+    treasuryEyebrow: "Treasury",
+    treasuryTitle: "项目金库流向",
+    treasuryInternalKicker: "内盘交易",
+    treasuryInternalTitle: "限购成交",
+    treasuryInternalCopy: "项目在内盘阶段按单钱包 1-100 枚限购成交，达到设定底池后再发射到 Pancake Swap。",
+    treasuryTaxKicker: "项目税机制",
+    treasuryTaxTitle: "四路分配",
+    treasuryTaxCopy: "营销收 BNB；分红自动发给达到 1 枚的持币者；回流 LP 自动进入项目池；销毁用于减少供应量。",
+    treasuryLaunchKicker: "外盘发射",
+    treasuryLaunchTitle: "LP 黑洞",
+    treasuryLaunchCopy: "测试阶段可用 0.05-8 BNB 的手动阈值创建 Pancake 流动池，LP token 发送到黑洞。",
     profileEyebrow: "Profile",
     profileTitle: "个人资料",
     profileWalletLabel: "钱包",
@@ -828,6 +926,84 @@ const translations = {
     connectWallet: "Connect Wallet",
     walletMissing: "Wallet not found",
     walletNotConnected: "Not connected",
+    notFilled: "Not filled",
+    createEyebrow: "Create BSC Project",
+    createTitle: "Create a limited-buy launch",
+    updatePreview: "Update Preview",
+    projectAvatar: "Project Avatar",
+    avatarSupport: "PNG / JPG / WEBP supported",
+    uploadAvatar: "Upload project avatar",
+    noImageSelected: "No image selected",
+    avatarHelp: "Add an avatar when creating the project. The preview card updates automatically.",
+    projectName: "Project name",
+    tokenSymbol: "Token symbol",
+    launchPoolBnb: "Launch pool BNB",
+    socialInfo: "Social links",
+    socialHelp: "Collected on the create page",
+    website: "Website",
+    walletCapTitle: "Wallet buy limit",
+    enableWalletCap: "Enable limit",
+    walletCapSteps: "Limit steps",
+    tokensPerWallet: "tokens / wallet",
+    manualWalletCap: "Manual limit 1-100 tokens",
+    tokenUnit: "tokens",
+    noWalletCap: "No limit",
+    launchThresholdTitle: "Launch threshold",
+    projectTax: "Project tax",
+    enableTax: "Enable tax",
+    taxNote: "When off, the project charges no mechanism tax. When enabled, you can set 1%-10%; marketing receives BNB, holders with at least 1 token receive BNB rewards automatically, and LP flow returns to the project pool.",
+    marketingWallet: "Marketing wallet",
+    marketingWalletHelp: "Only needed when tax is enabled. Leave blank to use the connected wallet.",
+    marketingWalletBnb: "Marketing wallet (receives BNB)",
+    marketingWalletPlaceholder: "Marketing wallet address 0x...",
+    taxRate: "Tax rate",
+    manualTaxRate: "Manual tax rate 1-10%",
+    taxAllocation: "Tax allocation",
+    taxTotalLabel: "Total: ",
+    taxRemainLabel: "Unallocated: ",
+    taxFull: "Allocation is full at 100%.",
+    taxInvalid: "Current allocation is {total}%; it must equal exactly 100%.",
+    taxMarketingRow: "Marketing wallet (marketing, donations, BNB)",
+    taxBurnRow: "Burn (reduce supply)",
+    taxRewardRow: "Holder rewards (>= 1 token auto BNB)",
+    taxLpRow: "Return to LP (BNB auto into project pool)",
+    summarySupply: "Total supply",
+    summaryWalletCap: "Wallet limit",
+    summaryLaunchPool: "Launch pool",
+    summaryLpDestination: "LP destination",
+    createParams: "Create parameters",
+    copy: "Copy",
+    copied: "Copied",
+    createInitialStatus: "This will connect your wallet, call the launchpad contract, and submit the create transaction.",
+    submitPending: "Submitting...",
+    createConnectStatus: "Connecting wallet and checking BSC network...",
+    createReadVanityStatus: "Reading launchpad contract rules...",
+    createGenerateAddressStatus: "Generating token contract address...",
+    createVerifyAddressStatus: "Candidate address found: {address}. Verifying token contract address on-chain...",
+    createConfirmTxStatus: "On-chain predicted address confirmed: {address}. Opening wallet confirmation...",
+    createSubmittedStatus: "Transaction submitted: {hash}. Waiting for confirmation...",
+    createSaveAvatarStatus: "Created: Project #{id}. Saving project avatar...",
+    createVerifySourceStatus: "Created: Project #{id}, token {token}. Auto-verifying source...",
+    createVerifiedStatus: "Created: Project #{id}, token {token}. {message}",
+    createConfirmedNoEventStatus: "Transaction confirmed: {hash}. ProjectCreated event was not parsed; check BscScan for details.",
+    createFailedStatus: "Create transaction failed. Please check wallet prompts and parameters.",
+    createPreviewUpdated: "Preview updated. If everything looks good, click Create Token.",
+    walletReadyStatus: "Wallet connected. You can create a token.",
+    walletConnectFailed: "Wallet connection failed.",
+    networkSwitchFailed: "BSC network switch failed.",
+    avatarTypeError: "Avatar must be PNG, JPG, or WebP.",
+    avatarSizeError: "Avatar must be under 2MB. Please compress it and upload again.",
+    treasuryEyebrow: "Treasury",
+    treasuryTitle: "Project treasury flow",
+    treasuryInternalKicker: "Internal trading",
+    treasuryInternalTitle: "Limited buys",
+    treasuryInternalCopy: "During the internal phase, each wallet can buy 1-100 tokens. After the target pool is reached, the project launches to Pancake Swap.",
+    treasuryTaxKicker: "Project tax",
+    treasuryTaxTitle: "Four-way allocation",
+    treasuryTaxCopy: "Marketing receives BNB; holders with at least 1 token receive rewards automatically; LP flow returns to the project pool; burn reduces supply.",
+    treasuryLaunchKicker: "External launch",
+    treasuryLaunchTitle: "LP burn",
+    treasuryLaunchCopy: "For testing, projects can launch Pancake liquidity with a manual 0.05-8 BNB threshold, and LP tokens are sent to the burn address.",
     profileEyebrow: "Profile",
     profileTitle: "Profile",
     profileWalletLabel: "Wallet",
@@ -936,6 +1112,11 @@ async function refreshProfile() {
 }
 
 function openMenu() {
+  if (window.matchMedia("(min-width: 761px)").matches) {
+    $(".app-shell").classList.toggle("sidebar-expanded");
+    $(".app-shell").classList.toggle("sidebar-collapsed", !$(".app-shell").classList.contains("sidebar-expanded"));
+    return;
+  }
   $("#sideDrawer").hidden = false;
   document.body.classList.add("drawer-open");
 }
@@ -962,6 +1143,11 @@ function setLanguage(lang) {
     $("#profileConnectButton").textContent = t("connectWallet");
     $("#profileWallet").textContent = t("walletNotConnected");
   }
+  if (!state.avatarFileName) {
+    $("#avatarFileName").textContent = t("noImageSelected");
+  }
+  updateTaxState();
+  updateCreateState();
   if ($("#projectList")) {
     renderProjects();
   }
@@ -1402,6 +1588,9 @@ function updateTabs(nextTab) {
   $$(".tab").forEach((tab) => {
     tab.classList.toggle("active", tab.dataset.tab === nextTab);
   });
+  $$("[data-rail-tab]").forEach((item) => {
+    item.classList.toggle("active", item.dataset.railTab === nextTab);
+  });
 
   const panels = {
     market: "#marketPanel",
@@ -1450,8 +1639,8 @@ function updateTaxState() {
   $("#donutValue").textContent = `${Math.min(total, 100)}%`;
   warning.classList.toggle("invalid", state.taxEnabled && total !== 100);
   warning.textContent = total === 100
-    ? "分配已满 100%。"
-    : `当前分配为 ${total}%，需要刚好等于 100%。`;
+    ? t("taxFull")
+    : t("taxInvalid").replace("{total}", total);
   const taxCheck = $("#taxCheck");
   if (taxCheck) {
     taxCheck.checked = !state.taxEnabled || total === 100;
@@ -1472,7 +1661,7 @@ function updateAvatarPreview(url, fileName) {
   state.avatarFileName = fileName || "";
   $("#avatarPreview").src = state.avatarUrl;
   $("#previewAvatar").src = state.avatarUrl;
-  $("#avatarFileName").textContent = state.avatarFileName || "未选择图片";
+  $("#avatarFileName").textContent = state.avatarFileName || t("noImageSelected");
 }
 
 function updateCreateState() {
@@ -1495,7 +1684,7 @@ function updateCreateState() {
 
   $("#capValue").textContent = state.cap;
   $("#thresholdValue").textContent = state.threshold;
-  $("#summaryCap").textContent = state.walletCapEnabled ? `${state.cap} 枚` : "不限购";
+  $("#summaryCap").textContent = state.walletCapEnabled ? `${state.cap} ${t("tokenUnit")}` : t("noWalletCap");
   $("#summaryThreshold").textContent = state.threshold;
   $("#previewName").textContent = name;
   $("#previewSymbol").textContent = `${symbol} / BSC`;
@@ -1645,7 +1834,7 @@ function validateCreateRequest(params) {
   }
 }
 
-async function findVanitySalt(params, creator) {
+async function findVanitySalt(params, creator, initCodeHash = "") {
   const targetSuffix = String(config.vanityTokenSuffix || "0000").toLowerCase();
   const maxAttempts = Number(config.vanitySaltMaxAttempts || 240000);
   const result = await apiPost("/api/vanity-salt", {
@@ -1654,6 +1843,7 @@ async function findVanitySalt(params, creator) {
     tokenName: params.name,
     tokenSymbol: params.symbol,
     supply: "10000000000000000000000",
+    initCodeHash,
     suffix: targetSuffix,
     maxAttempts
   });
@@ -1714,15 +1904,28 @@ async function getLaunchThresholdArgument(launchpad, thresholdBnb) {
   }
 }
 
+async function verifyVanityWithLaunchpad(launchpad, params, vanity, wallet) {
+  const predicted = await launchpad.predictTokenAddress(
+    params.name,
+    params.symbol,
+    vanity.userSalt,
+    wallet
+  );
+  if (!String(predicted).toLowerCase().endsWith("0000")) {
+    throw new Error(`链上预测地址 ${predicted} 不是 0000 结尾。当前发射台合约和服务器靓号字节码不一致，请用当前仓库重新部署发射台合约，或更新 build-vanity 里的 LaunchpadToken.bin。`);
+  }
+  return predicted;
+}
+
 async function handleCreateToken() {
   const buttons = [$("#createTokenButton"), $("#createTokenButtonSecondary")];
   buttons.forEach((button) => {
     button.disabled = true;
-    button.textContent = "提交中...";
+    button.textContent = t("submitPending");
   });
 
   try {
-    setCreateStatus("正在连接钱包并检查 BSC 网络...", "");
+    setCreateStatus(t("createConnectStatus"), "");
     const wallet = await connectWallet();
     const params = buildCreateParams(wallet);
     validateCreateRequest(params);
@@ -1732,9 +1935,13 @@ async function handleCreateToken() {
     const signer = await provider.getSigner();
     const launchpad = new ethers.Contract(config.launchpadAddress, LAUNCHPAD_ABI, signer);
     const launchThresholdArgument = await getLaunchThresholdArgument(launchpad, params.launchThresholdBnb);
-    setCreateStatus("正在生成尾号 0000 的代币合约地址...", "");
-    const vanity = await findVanitySalt(params, wallet);
-    setCreateStatus(`已找到尾号 0000 的预测地址：${vanity.predicted}，正在唤起钱包确认创建交易。`, "");
+    setCreateStatus(t("createReadVanityStatus"), "");
+    const initCodeHash = await launchpad.launchpadTokenInitCodeHash(params.name, params.symbol);
+    setCreateStatus(t("createGenerateAddressStatus"), "");
+    const vanity = await findVanitySalt(params, wallet, initCodeHash);
+    setCreateStatus(t("createVerifyAddressStatus").replace("{address}", vanity.predicted), "");
+    const chainPredicted = await verifyVanityWithLaunchpad(launchpad, params, vanity, wallet);
+    setCreateStatus(t("createConfirmTxStatus").replace("{address}", chainPredicted), "");
     const allocation = [
       params.taxAllocationBps.marketingWalletBnb,
       params.taxAllocationBps.burnTokenSupply,
@@ -1758,33 +1965,36 @@ async function handleCreateToken() {
 
     const tx = await launchpad.createProjectVanity(projectConfig, projectTaxConfig, vanity.userSalt);
 
-    setCreateStatus(`交易已提交：${tx.hash}，正在等待链上确认...`, "");
+    setCreateStatus(t("createSubmittedStatus").replace("{hash}", tx.hash), "");
     const receipt = await tx.wait();
     const created = parseProjectCreated(receipt, launchpad);
 
     if (created) {
-      setCreateStatus(`创建成功：Project #${created.projectId}。正在保存项目头像...`, "success");
+      setCreateStatus(t("createSaveAvatarStatus").replace("{id}", created.projectId), "success");
       params.avatarUrl = await uploadAvatarForProject(params);
       params.metadata.avatarUrl = params.avatarUrl;
       const project = addCreatedProject(params, created);
-      setCreateStatus(`创建成功：Project #${created.projectId}，代币 ${shortAddress(created.token)}。正在自动开源...`, "success");
+      setCreateStatus(t("createVerifySourceStatus").replace("{id}", created.projectId).replace("{token}", shortAddress(created.token)), "success");
       autoVerifyCreatedToken(params, created).then((verifyMessage) => {
-        setCreateStatus(`创建成功：Project #${created.projectId}，代币 ${shortAddress(created.token)}。${verifyMessage}`, "success");
+        setCreateStatus(t("createVerifiedStatus")
+          .replace("{id}", created.projectId)
+          .replace("{token}", shortAddress(created.token))
+          .replace("{message}", verifyMessage), "success");
       });
       updateTabs("market");
       openTradeModal(project);
     } else {
-      setCreateStatus(`交易已确认：${tx.hash}。未解析到 ProjectCreated 事件，请到 BscScan 查看详情。`, "success");
+      setCreateStatus(t("createConfirmedNoEventStatus").replace("{hash}", tx.hash), "success");
     }
   } catch (error) {
     const message = error && (error.shortMessage || error.reason || error.message)
       ? (error.shortMessage || error.reason || error.message)
-      : "创建交易失败，请检查钱包弹窗和参数。";
+      : t("createFailedStatus");
     setCreateStatus(message, "error");
   } finally {
     buttons.forEach((button) => {
       button.disabled = false;
-      button.textContent = "创建代币";
+      button.textContent = t("createToken");
     });
   }
 }
@@ -1798,14 +2008,14 @@ function handleAvatarChange(event) {
   }
   const allowedTypes = ["image/png", "image/jpeg", "image/webp"];
   if (!allowedTypes.includes(file.type)) {
-    setCreateStatus("头像只支持 PNG、JPG、WebP 格式。", "error");
+    setCreateStatus(t("avatarTypeError"), "error");
     event.target.value = "";
     updateAvatarPreview(defaultAvatar, "");
     updateCreateState();
     return;
   }
   if (file.size > 2 * 1024 * 1024) {
-    setCreateStatus("头像需要小于 2MB，请压缩后再上传。", "error");
+    setCreateStatus(t("avatarSizeError"), "error");
     event.target.value = "";
     updateAvatarPreview(defaultAvatar, "");
     updateCreateState();
@@ -1834,6 +2044,12 @@ function bindEvents() {
       updateTabs(button.dataset.drawerTab);
       closeMenu();
     });
+  });
+  $$("[data-rail-tab]").forEach((button) => {
+    button.addEventListener("click", () => updateTabs(button.dataset.railTab));
+  });
+  $$("[data-rail-toggle]").forEach((button) => {
+    button.addEventListener("click", () => openMenu());
   });
   $$(".language-toggle button").forEach((button) => {
     button.addEventListener("click", () => setLanguage(button.dataset.lang));
@@ -1923,6 +2139,19 @@ function bindEvents() {
   });
 
   $("#projectList").addEventListener("click", (event) => {
+    const refreshEmpty = event.target.closest("[data-empty-refresh]");
+    if (refreshEmpty) {
+      refreshEmpty.disabled = true;
+      refreshEmpty.textContent = t("syncing");
+      loadBackendProjects().then(() => syncChainProjects()).finally(() => {
+        refreshEmpty.disabled = false;
+      });
+      return;
+    }
+    if (event.target.closest("[data-open-create]")) {
+      updateTabs("create");
+      return;
+    }
     if (event.target.closest(".project-thumb button")) {
       return;
     }
@@ -1994,17 +2223,17 @@ function bindEvents() {
   $("#connectButton").addEventListener("click", async () => {
     try {
       await connectWallet();
-      setCreateStatus("钱包已连接，可以创建代币。", "success");
+      setCreateStatus(t("walletReadyStatus"), "success");
       renderParams(state.wallet);
     } catch (error) {
-      setCreateStatus(error.message || "连接钱包失败。", "error");
+      setCreateStatus(error.message || t("walletConnectFailed"), "error");
     }
   });
   $("#networkButton").addEventListener("click", async () => {
     try {
       await switchToBsc();
     } catch (error) {
-      setCreateStatus(error.message || "切换 BSC 网络失败。", "error");
+      setCreateStatus(error.message || t("networkSwitchFailed"), "error");
     }
   });
   $("#avatarInput").addEventListener("change", handleAvatarChange);
@@ -2072,16 +2301,16 @@ function bindEvents() {
   $("#createForm").addEventListener("submit", (event) => {
     event.preventDefault();
     renderParams(state.wallet);
-    setCreateStatus("预览已更新，确认无误后点击“创建代币”。", "");
+    setCreateStatus(t("createPreviewUpdated"), "");
   });
 
   const copyParams = $("#copyParams");
   if (copyParams) {
     copyParams.addEventListener("click", async () => {
       await navigator.clipboard.writeText($("#paramsOutput").textContent);
-      copyParams.textContent = "已复制";
+      copyParams.textContent = t("copied");
       setTimeout(() => {
-        copyParams.textContent = "复制";
+        copyParams.textContent = t("copy");
       }, 1400);
     });
   }

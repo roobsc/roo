@@ -293,6 +293,18 @@ contract FourBscLaunchpad {
         return _predictTokenAddress(tokenName, tokenSymbol, _scopedSalt(creator, userSalt));
     }
 
+    function launchpadTokenInitCodeHash(
+        string calldata tokenName,
+        string calldata tokenSymbol
+    ) external view returns (bytes32) {
+        return keccak256(
+            abi.encodePacked(
+                type(LaunchpadToken).creationCode,
+                abi.encode(tokenName, tokenSymbol, TOKEN_SUPPLY, address(this))
+            )
+        );
+    }
+
     function _createProject(
         ProjectConfig calldata config,
         ProjectTaxConfig calldata taxConfig,
