@@ -1854,10 +1854,32 @@ select {
   background: #171717;
 }
 
-.roo-chart canvas {
-  display: block;
+.trade-chart-surface {
   width: 100%;
   height: 360px;
+}
+
+.chart-empty {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  color: #37ff14;
+  font-weight: 900;
+}
+
+.chart-attribution {
+  position: absolute;
+  right: 10px;
+  bottom: 6px;
+  z-index: 3;
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 10px;
+  text-decoration: none;
+}
+
+.chart-attribution:hover {
+  color: rgba(255, 255, 255, 0.72);
 }
 
 .chart-tools {
@@ -2979,7 +3001,7 @@ select {
     justify-items: start;
   }
 
-  .roo-chart canvas {
+  .trade-chart-surface {
     height: 300px;
   }
 }

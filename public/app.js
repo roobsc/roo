@@ -325,6 +325,10 @@ const state = {
 };
 
 let projects = [];
+let tradeChartApi = null;
+let tradeCandleSeries = null;
+let tradeVolumeSeries = null;
+let tradeChartResizeObserver = null;
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -1347,142 +1351,138 @@ function normalizeChartCandles(rawCandles = [], fallbackPrice = 0) {
   return filled;
 }
 
+function formatChartPrice(value) {
+  return Number(value || 0).toFixed(8).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function toChartTimestamp(time) {
+  const value = Number(time || Date.now());
+  return Math.floor((value > 1_000_000_000_000 ? value : value * 1000) / 1000);
+}
+
+function ensureTradeChart(container) {
+  if (!window.LightweightCharts || !container) {
+    return null;
+  }
+  const { createChart, CandlestickSeries, HistogramSeries, CrosshairMode } = window.LightweightCharts;
+  if (tradeChartApi && tradeCandleSeries && tradeVolumeSeries) {
+    return { chart: tradeChartApi, candleSeries: tradeCandleSeries, volumeSeries: tradeVolumeSeries };
+  }
+
+  tradeChartApi = createChart(container, {
+    width: container.clientWidth || 900,
+    height: container.clientHeight || 360,
+    autoSize: true,
+    layout: {
+      background: { color: "#171717" },
+      textColor: "rgba(255, 255, 255, 0.72)",
+      fontFamily: "'Segoe UI', sans-serif",
+      fontSize: 12
+    },
+    grid: {
+      vertLines: { color: "rgba(255, 255, 255, 0.07)" },
+      horzLines: { color: "rgba(255, 255, 255, 0.07)" }
+    },
+    crosshair: {
+      mode: CrosshairMode.Normal,
+      vertLine: { color: "rgba(255,255,255,0.55)", style: 2 },
+      horzLine: { color: "rgba(255,255,255,0.55)", style: 2 }
+    },
+    rightPriceScale: {
+      borderColor: "rgba(255, 255, 255, 0.12)",
+      scaleMargins: { top: 0.1, bottom: 0.22 }
+    },
+    timeScale: {
+      borderColor: "rgba(255, 255, 255, 0.12)",
+      timeVisible: true,
+      secondsVisible: false,
+      rightOffset: 8,
+      barSpacing: 9,
+      minBarSpacing: 4
+    },
+    localization: {
+      priceFormatter: formatChartPrice
+    },
+    handleScroll: true,
+    handleScale: true
+  });
+
+  tradeCandleSeries = tradeChartApi.addSeries(CandlestickSeries, {
+    upColor: "#37ff14",
+    downColor: "#ff3b30",
+    borderUpColor: "#37ff14",
+    borderDownColor: "#ff3b30",
+    wickUpColor: "#37ff14",
+    wickDownColor: "#ff3b30",
+    priceFormat: {
+      type: "price",
+      precision: 10,
+      minMove: 0.0000000001
+    }
+  });
+  tradeVolumeSeries = tradeChartApi.addSeries(HistogramSeries, {
+    priceFormat: { type: "volume" },
+    priceScaleId: "volume",
+    lastValueVisible: false,
+    priceLineVisible: false
+  });
+  tradeVolumeSeries.priceScale().applyOptions({
+    scaleMargins: { top: 0.82, bottom: 0 },
+    borderVisible: false
+  });
+
+  if (window.ResizeObserver) {
+    tradeChartResizeObserver = new ResizeObserver(() => {
+      if (container.clientWidth && container.clientHeight) {
+        tradeChartApi.resize(container.clientWidth, container.clientHeight);
+      }
+    });
+    tradeChartResizeObserver.observe(container);
+  }
+
+  return { chart: tradeChartApi, candleSeries: tradeCandleSeries, volumeSeries: tradeVolumeSeries };
+}
+
 function drawTradeChart(project = {}, backendCandles = null) {
-  const canvas = $("#tradeChart");
-  const context = canvas.getContext("2d");
-  const { width, height } = canvas;
-  const chartLeft = 52;
-  const chartRight = width - 96;
-  const chartTop = 42;
-  const chartBottom = height - 50;
-  const chartWidth = chartRight - chartLeft;
-  const chartHeight = chartBottom - chartTop;
-  const formatPrice = (value) => Number(value || 0).toFixed(8).replace(/0+$/, "").replace(/\.$/, "");
+  const container = $("#tradeChart");
   const fallbackPrice = Number(project.priceBnb || 0);
   const candles = normalizeChartCandles(backendCandles || [], fallbackPrice);
   const displayPrice = Number((candles.length ? candles[candles.length - 1].close : fallbackPrice) || 0);
+  const chart = ensureTradeChart(container);
+  const priceTag = $("#chartPriceTag");
 
-  context.clearRect(0, 0, width, height);
-  context.fillStyle = "#161719";
-  context.fillRect(0, 0, width, height);
-
-  context.strokeStyle = "rgba(255, 255, 255, 0.07)";
-  context.lineWidth = 1;
-  for (let i = 0; i <= 8; i += 1) {
-    const x = chartLeft + (chartWidth * i) / 8;
-    context.beginPath();
-    context.moveTo(x, chartTop);
-    context.lineTo(x, chartBottom);
-    context.stroke();
-  }
-  for (let i = 0; i <= 5; i += 1) {
-    const y = chartTop + (chartHeight * i) / 5;
-    context.beginPath();
-    context.moveTo(chartLeft, y);
-    context.lineTo(chartRight, y);
-    context.stroke();
-  }
-
-  if (!candles.length) {
-    context.fillStyle = "#37ff14";
-    context.font = "16px sans-serif";
-    context.fillText("暂无真实成交 K 线", chartLeft + 14, chartTop + 28);
-    $("#chartPriceTag").textContent = displayPrice > 0 ? formatPrice(displayPrice) : "--";
-    $("#chartPriceTag").style.top = "50%";
+  if (!chart || !candles.length) {
+    container.innerHTML = `<div class="chart-empty">暂无真实成交 K 线</div>`;
+    priceTag.textContent = displayPrice > 0 ? formatChartPrice(displayPrice) : "--";
+    priceTag.style.top = "50%";
     return;
   }
 
-  const max = Math.max(...candles.map((candle) => candle.high));
-  const min = Math.min(...candles.map((candle) => candle.low));
-  const range = max - min;
-  const padding = range === 0 ? Math.max(max * 0.08, 0.00000001) : range * 0.12;
-  const top = max + padding;
-  const bottom = Math.max(0, min - padding);
-  const scaleY = (value) => chartBottom - ((value - bottom) / (top - bottom || 1)) * chartHeight;
-  const maxVisibleCandles = Math.max(18, Math.floor(chartWidth / 13));
-  const visibleCandles = candles.slice(-maxVisibleCandles);
-  const step = Math.max(8, Math.min(14, chartWidth / Math.max(visibleCandles.length, 1)));
-  const candleWidth = Math.max(4, Math.min(8, step * 0.58));
-  const startX = Math.max(chartLeft + 2, chartRight - (visibleCandles.length - 1) * step - candleWidth);
-
-  const first = candles[0];
-  const lastCandle = candles[candles.length - 1];
-  const change = first.open > 0 ? ((lastCandle.close - first.open) / first.open) * 100 : 0;
-  const volume = candles.reduce((sum, candle) => sum + Number(candle.volume || 0), 0);
-  const chartGreen = "#37ff14";
-  const chartRed = "#ff3b30";
-  const trendColor = change >= 0 ? chartGreen : chartRed;
-
-  context.fillStyle = trendColor;
-  context.font = "12px 'Segoe UI', sans-serif";
-  context.beginPath();
-  context.arc(22, 20, 5, 0, Math.PI * 2);
-  context.fill();
-  context.fillText(
-    `开 ${formatPrice(lastCandle.open)}  高 ${formatPrice(lastCandle.high)}  低 ${formatPrice(lastCandle.low)}  收 ${formatPrice(lastCandle.close)}   ${volume.toFixed(6)} (${change >= 0 ? "+" : ""}${change.toFixed(2)}%)`,
-    48,
-    24
-  );
-
-  context.fillStyle = "rgba(255, 255, 255, 0.72)";
-  context.font = "12px 'Segoe UI', sans-serif";
-  for (let i = 0; i <= 5; i += 1) {
-    const value = top - ((top - bottom) * i) / 5;
-    const y = scaleY(value);
-    context.fillText(formatPrice(value), chartRight + 10, y + 4);
-  }
-
-  context.strokeStyle = trendColor;
-  context.lineWidth = 1.3;
-  context.beginPath();
-  visibleCandles.forEach((candle, index) => {
-    const x = startX + index * step + candleWidth / 2;
-    const y = scaleY(candle.close);
-    if (index === 0) {
-      context.moveTo(x, y);
-    } else {
-      context.lineTo(x, y);
-    }
-  });
-  context.stroke();
-
-  visibleCandles.forEach((candle, index) => {
-    const x = startX + index * step;
-    const isUp = candle.close >= candle.open;
-    const color = isUp ? chartGreen : chartRed;
-    const centerX = x + candleWidth / 2;
-    const openY = scaleY(candle.open);
-    const closeY = scaleY(candle.close);
-    const highY = scaleY(candle.high);
-    const lowY = scaleY(candle.low);
-    context.strokeStyle = color;
-    context.fillStyle = color;
-    context.lineWidth = 1.4;
-    context.beginPath();
-    context.moveTo(centerX, highY);
-    context.lineTo(centerX, lowY);
-    context.stroke();
-    const bodyHeight = Math.max(7, Math.abs(openY - closeY));
-    const bodyY = Math.min(openY, closeY) - (bodyHeight === 7 ? 3.5 : 0);
-    const bodyWidth = Math.max(6, candleWidth);
-    context.globalAlpha = candle.synthetic ? 0.42 : 1;
-    context.fillRect(centerX - bodyWidth / 2, bodyY, bodyWidth, bodyHeight);
-    context.globalAlpha = 1;
-  });
-
+  const data = candles.map((candle) => ({
+    time: toChartTimestamp(candle.time),
+    open: Number(candle.open),
+    high: Number(candle.high),
+    low: Number(candle.low),
+    close: Number(candle.close)
+  }));
+  const volumeData = candles.map((candle) => ({
+    time: toChartTimestamp(candle.time),
+    value: Number(candle.volume || 0),
+    color: candle.close >= candle.open ? "rgba(55, 255, 20, 0.34)" : "rgba(255, 59, 48, 0.34)"
+  }));
   const last = candles[candles.length - 1].close;
-  const y = scaleY(last);
-  context.setLineDash([2, 3]);
-  context.strokeStyle = `${trendColor}cc`;
-  context.beginPath();
-  context.moveTo(chartLeft, y);
-  context.lineTo(chartRight, y);
-  context.stroke();
-  context.setLineDash([]);
-  $("#chartPriceTag").textContent = formatPrice(displayPrice || last);
-  $("#chartPriceTag").style.top = `${Math.max(chartTop + 4, Math.min(chartBottom - 18, y - 10))}px`;
-  $("#chartPriceTag").style.background = trendColor;
-  $("#chartPriceTag").style.color = "#111";
+  const lastCandle = candles[candles.length - 1];
+  const trendColor = lastCandle.close >= lastCandle.open ? "#37ff14" : "#ff3b30";
+
+  chart.candleSeries.setData(data);
+  chart.volumeSeries.setData(volumeData);
+  chart.chart.timeScale().fitContent();
+
+  const coordinate = chart.candleSeries.priceToCoordinate(last);
+  priceTag.textContent = formatChartPrice(displayPrice || last);
+  priceTag.style.top = coordinate === null ? "50%" : `${Math.max(44, Math.min((container.clientHeight || 360) - 24, coordinate - 10))}px`;
+  priceTag.style.background = trendColor;
+  priceTag.style.color = "#111";
 }
 
 function renderTradeTable(project, backendTrades = null) {

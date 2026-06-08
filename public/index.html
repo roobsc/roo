@@ -576,7 +576,8 @@
                 <button type="button">T</button>
                 <button type="button">☺</button>
               </div>
-              <canvas id="tradeChart" width="980" height="360"></canvas>
+              <div id="tradeChart" class="trade-chart-surface"></div>
+              <a class="chart-attribution" href="https://www.tradingview.com/" target="_blank" rel="noreferrer">Charts by TradingView</a>
               <div class="chart-price-tag" id="chartPriceTag">0.001</div>
             </div>
 
@@ -681,6 +682,7 @@
 
     <script src="./config.js"></script>
     <script src="./vendor/ethers.umd.min.js"></script>
+    <script src="./vendor/lightweight-charts.standalone.production.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>
