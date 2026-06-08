@@ -471,6 +471,22 @@ function compactLink(url) {
   }
 }
 
+function escapeAttr(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function getProjectAvatarMarkup(project) {
+  const avatarUrl = project.avatarUrl || defaultAvatar;
+  if (avatarUrl) {
+    return `<img class="project-avatar-image" src="${escapeAttr(avatarUrl)}" alt="${escapeAttr(project.symbol || project.name || "token")}">`;
+  }
+  return `<span>${project.avatar || String(project.symbol || "?").slice(0, 1)}</span>`;
+}
+
 function hasConfiguredAddress(address) {
   return Boolean(address)
     && window.ethers
@@ -662,7 +678,7 @@ function renderProjects() {
   list.innerHTML = visibleProjects.map((project) => `
     <article class="project-card" data-project-symbol="${project.symbol}">
       <div class="project-thumb">
-        <span>${project.avatar}</span>
+        ${getProjectAvatarMarkup(project)}
         <button type="button" aria-label="收藏 ${project.name}">★</button>
       </div>
       <div class="project-body">
@@ -889,7 +905,7 @@ function addCreatedProject(params, created) {
     change: 0,
     listed: false,
     avatar: params.symbol.slice(0, 1),
-    avatarUrl: state.avatarUrl || defaultAvatar
+    avatarUrl: params.avatarUrl || params.metadata.avatarUrl || defaultAvatar
   };
   return upsertLocalProject(project);
 }
@@ -1272,6 +1288,7 @@ function updateCreateState() {
 function buildMetadata() {
   return {
     avatarFileName: state.avatarFileName || "",
+    avatarUrl: state.avatarUrl || defaultAvatar,
     x: $("#xLink").value.trim(),
     telegram: $("#telegramLink").value.trim(),
     website: $("#websiteLink").value.trim()
@@ -1413,6 +1430,18 @@ async function findVanitySalt(params, creator) {
   return result;
 }
 
+async function uploadAvatarForProject(params) {
+  if (!state.avatarFileName || !state.avatarUrl || !state.avatarUrl.startsWith("data:")) {
+    return state.avatarUrl || defaultAvatar;
+  }
+  const result = await apiPost("/api/upload-avatar", {
+    fileName: state.avatarFileName,
+    symbol: params.symbol,
+    dataUrl: state.avatarUrl
+  });
+  return result.avatarUrl || state.avatarUrl;
+}
+
 function parseProjectCreated(receipt, contract) {
   for (const log of receipt.logs || []) {
     try {
@@ -1478,6 +1507,9 @@ async function handleCreateToken() {
     const created = parseProjectCreated(receipt, launchpad);
 
     if (created) {
+      setCreateStatus(`创建成功：Project #${created.projectId}。正在保存项目头像...`, "success");
+      params.avatarUrl = await uploadAvatarForProject(params);
+      params.metadata.avatarUrl = params.avatarUrl;
       const project = addCreatedProject(params, created);
       setCreateStatus(`创建成功：Project #${created.projectId}，代币 ${shortAddress(created.token)}。正在自动开源...`, "success");
       autoVerifyCreatedToken(params, created).then((verifyMessage) => {
@@ -1504,6 +1536,21 @@ async function handleCreateToken() {
 function handleAvatarChange(event) {
   const [file] = event.target.files || [];
   if (!file) {
+    updateAvatarPreview(defaultAvatar, "");
+    updateCreateState();
+    return;
+  }
+  const allowedTypes = ["image/png", "image/jpeg", "image/webp"];
+  if (!allowedTypes.includes(file.type)) {
+    setCreateStatus("头像只支持 PNG、JPG、WebP 格式。", "error");
+    event.target.value = "";
+    updateAvatarPreview(defaultAvatar, "");
+    updateCreateState();
+    return;
+  }
+  if (file.size > 2 * 1024 * 1024) {
+    setCreateStatus("头像需要小于 2MB，请压缩后再上传。", "error");
+    event.target.value = "";
     updateAvatarPreview(defaultAvatar, "");
     updateCreateState();
     return;

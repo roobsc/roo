@@ -1,10 +1,10 @@
 window.LAUNCHPAD_CONFIG = {
   chainId: 56,
   chainName: "BNB Smart Chain",
-  launchpadAddress: "0x25603609F8064a906ed684D5C752A60447DCFE7b",
+  launchpadAddress: "0x17d2148e730C92EbA675C4F8cdd59aB43FCF52Db",
   platformFeeWallet: "0xD902E8412C310334EB206D8035E24068e8701564",
   pancakeRouter: "0x10ED43C718714eb63d5aA57B78B54704E256024E",
-  apiBaseUrl: "http://127.0.0.1:4301",
+  apiBaseUrl: "",
   bnbSymbol: "BNB",
   defaultLaunchThresholdBnb: 5,
   defaultBuyCapTokens: 25,

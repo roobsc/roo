@@ -2,6 +2,7 @@ const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
 const postgres = require("postgres");
+const { put } = require("@vercel/blob");
 
 const root = __dirname;
 const port = Number(process.env.PORT || 4301);
@@ -12,6 +13,8 @@ const launchpadTokenBinPath = path.join(root, "build-vanity", "contracts_FourBsc
 const bscscanApiUrl = process.env.BSCSCAN_API_URL || "https://api.etherscan.io/v2/api";
 const bscscanApiKey = process.env.BSCSCAN_API_KEY || "";
 const postgresUrl = process.env.POSTGRES_URL || process.env.DATABASE_URL || "";
+const blobToken = process.env.BLOB_READ_WRITE_TOKEN || "";
+const maxAvatarBytes = 2 * 1024 * 1024;
 const sql = postgresUrl
   ? postgres(postgresUrl, {
       ssl: postgresUrl.includes("sslmode=disable") ? false : "require",
@@ -272,12 +275,12 @@ function sendJson(res, status, data) {
   send(res, status, JSON.stringify(data), { "Content-Type": "application/json; charset=utf-8" });
 }
 
-function readJsonBody(req) {
+function readJsonBody(req, limit = 1_000_000) {
   return new Promise((resolve, reject) => {
     let body = "";
     req.on("data", (chunk) => {
       body += chunk;
-      if (body.length > 1_000_000) {
+      if (body.length > limit) {
         reject(new Error("Body too large"));
         req.destroy();
       }
@@ -291,6 +294,53 @@ function readJsonBody(req) {
     });
     req.on("error", reject);
   });
+}
+
+function safeSlug(value, fallback = "token") {
+  const slug = String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 42);
+  return slug || fallback;
+}
+
+function parseAvatarDataUrl(dataUrl) {
+  const match = String(dataUrl || "").match(/^data:(image\/(?:png|jpeg|jpg|webp));base64,([a-z0-9+/=\s]+)$/i);
+  if (!match) {
+    throw new Error("Only png, jpg and webp avatar images are supported");
+  }
+  const contentType = match[1].toLowerCase() === "image/jpg" ? "image/jpeg" : match[1].toLowerCase();
+  const buffer = Buffer.from(match[2].replace(/\s/g, ""), "base64");
+  if (!buffer.length || buffer.length > maxAvatarBytes) {
+    throw new Error("Avatar image must be smaller than 2MB");
+  }
+  const ext = contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : "jpg";
+  return { buffer, contentType, ext };
+}
+
+async function uploadAvatar(payload) {
+  const { buffer, contentType, ext } = parseAvatarDataUrl(payload.dataUrl);
+  if (!blobToken) {
+    return {
+      avatarUrl: payload.dataUrl,
+      skipped: true,
+      message: "Missing BLOB_READ_WRITE_TOKEN; using local data URL fallback"
+    };
+  }
+  const symbol = safeSlug(payload.symbol || payload.fileName || "token");
+  const pathname = `avatars/${Date.now()}-${symbol}.${ext}`;
+  const blob = await put(pathname, buffer, {
+    access: "public",
+    contentType,
+    token: blobToken
+  });
+  return {
+    avatarUrl: blob.url,
+    pathname: blob.pathname,
+    contentType,
+    size: buffer.length
+  };
 }
 
 function getProjectKey(project) {
@@ -545,6 +595,12 @@ async function handleApi(req, res, url) {
     const project = await readJsonBody(req);
     const saved = await upsertProjectStore(project);
     return sendJson(res, 200, { project: saved });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/upload-avatar") {
+    const payload = await readJsonBody(req, 4_000_000);
+    const result = await uploadAvatar(payload);
+    return sendJson(res, 200, result);
   }
 
   if (req.method === "GET" && url.pathname === "/api/trades") {
