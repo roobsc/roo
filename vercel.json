@@ -3,20 +3,22 @@
   "builds": [
     {
       "src": "server.js",
-      "use": "@vercel/node",
-      "config": {
-        "includeFiles": [
-          "index.html",
-          "styles.css",
-          "app.js",
-          "config.js",
-          "assets/**",
-          "contracts/**",
-          "build-vanity/**"
-        ]
-      }
+      "use": "@vercel/node"
     }
   ],
+  "functions": {
+    "server.js": {
+      "includeFiles": [
+        "index.html",
+        "styles.css",
+        "app.js",
+        "config.js",
+        "assets/**",
+        "contracts/**",
+        "build-vanity/**"
+      ]
+    }
+  },
   "routes": [
     {
       "src": "/(.*)",
