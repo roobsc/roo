@@ -281,6 +281,7 @@ const state = {
   selectedProject: null,
   swapSide: "buy",
   selectedTokenBalance: 0,
+  chainSyncing: false,
   taxEnabled: false,
   projectTaxRate: 1,
   taxes: {
@@ -556,6 +557,79 @@ function upsertLocalProject(project) {
   renderProjects();
   apiPost("/api/projects/upsert", project).catch(() => {});
   return project;
+}
+
+function getProjectStage(launched, progress) {
+  if (launched) {
+    return "launched";
+  }
+  if (progress >= 80) {
+    return "launching";
+  }
+  return "new";
+}
+
+async function buildProjectFromChain(projectId, basics, provider) {
+  const token = new ethers.Contract(basics.token, ERC20_ABI, provider);
+  let name = `Project ${projectId}`;
+  let symbol = `P${projectId}`;
+  try {
+    [name, symbol] = await Promise.all([token.name(), token.symbol()]);
+  } catch {
+    // Some tokens may not expose metadata cleanly; keep fallback names.
+  }
+  const launchThreshold = Number(ethers.formatEther(basics.launchThreshold || 0n));
+  const bnbRaised = Number(ethers.formatEther(basics.bnbRaised || 0n));
+  const tokensSold = Number(ethers.formatEther(basics.tokensSold || 0n));
+  const progress = launchThreshold > 0
+    ? Math.min(100, Number(((bnbRaised / launchThreshold) * 100).toFixed(3)))
+    : 0;
+  const launched = Boolean(basics.launched);
+  return {
+    projectId: String(projectId),
+    name,
+    symbol,
+    status: launched ? "已发射" : "内盘",
+    stage: getProjectStage(launched, progress),
+    progress,
+    cap: basics.walletCap ? Math.max(0, Number(ethers.formatEther(basics.walletCap))) : 100,
+    raised: `${bnbRaised.toFixed(3)} / ${launchThreshold || 0} BNB`,
+    holders: 0,
+    marketCap: Math.round((bnbRaised * 600) + tokensSold),
+    creator: basics.creator,
+    contract: basics.token,
+    change: 0,
+    listed: launched,
+    avatar: symbol.slice(0, 1).toUpperCase(),
+    avatarUrl: defaultAvatar
+  };
+}
+
+async function syncChainProjects(limit = 120) {
+  if (state.chainSyncing || !window.ethers || !hasConfiguredAddress(config.launchpadAddress)) {
+    return;
+  }
+  state.chainSyncing = true;
+  try {
+    const provider = window.ethereum
+      ? new ethers.BrowserProvider(window.ethereum)
+      : new ethers.JsonRpcProvider(config.rpcUrl || "https://bsc-dataseed.binance.org");
+    const launchpad = getLaunchpadContract(provider);
+    const count = Number(await launchpad.projectCount());
+    const start = Math.max(0, count - Number(limit || 120));
+    for (let projectId = count - 1; projectId >= start; projectId -= 1) {
+      try {
+        const basics = await launchpad.getProjectBasics(BigInt(projectId));
+        const chainProject = await buildProjectFromChain(projectId, basics, provider);
+        const existing = projects.find((project) => String(project.projectId) === String(chainProject.projectId));
+        upsertLocalProject(existing ? { ...chainProject, ...existing, ...chainProject } : chainProject);
+      } catch {
+        // Keep syncing the rest even if one historical project cannot be read.
+      }
+    }
+  } finally {
+    state.chainSyncing = false;
+  }
 }
 
 async function findProjectByTokenAddress(tokenAddress) {
@@ -1583,6 +1657,24 @@ function bindEvents() {
     });
   });
 
+  $$(".market-sort button").forEach((button) => {
+    const label = button.textContent.trim();
+    if (label.includes("刷新") || label.includes("鍒锋柊")) {
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        const previousText = button.textContent;
+        button.textContent = "同步中...";
+        try {
+          await loadBackendProjects();
+          await syncChainProjects();
+        } finally {
+          button.disabled = false;
+          button.textContent = previousText;
+        }
+      });
+    }
+  });
+
   $("#listedOnly").addEventListener("change", (event) => {
     state.listedOnly = event.target.checked;
     renderProjects();
@@ -1785,7 +1877,7 @@ function boot() {
 
   renderTradeTicker();
   renderProjects();
-  loadBackendProjects();
+  loadBackendProjects().then(() => syncChainProjects());
   updateAvatarPreview(defaultAvatar, "");
   updateTaxState();
   updateCreateState();
