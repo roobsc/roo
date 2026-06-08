@@ -126,7 +126,7 @@ contract LaunchpadToken {
  * @notice BSC meme launchpad prototype:
  * - Fixed project supply: 10,000 tokens.
  * - Creator chooses one-wallet buy cap from 1 to 100 tokens.
- * - Creator chooses manual launch threshold from 3 to 8 BNB.
+ * - Creator chooses manual launch threshold from 0.05 to 8 BNB in testing mode.
  * - Internal market buy/sell charges 1% platform BNB tax.
  * - After launch, platform tax is disabled and LP tokens are sent to burn address.
  * - Project mechanism tax pays marketing in BNB, auto-pays holder dividends, and returns LP tax to the pool.
@@ -136,7 +136,7 @@ contract FourBscLaunchpad {
     uint256 public constant TOKEN_SUPPLY = 10_000 ether;
     uint256 public constant MIN_WALLET_CAP = 1 ether;
     uint256 public constant MAX_WALLET_CAP = 100 ether;
-    uint256 public constant MIN_LAUNCH_THRESHOLD = 3 ether;
+    uint256 public constant MIN_LAUNCH_THRESHOLD = 0.05 ether;
     uint256 public constant MAX_LAUNCH_THRESHOLD = 8 ether;
     uint16 public constant PLATFORM_TAX_BPS = 100;
     uint16 public constant BPS_DENOMINATOR = 10_000;
@@ -300,14 +300,14 @@ contract FourBscLaunchpad {
         bool requireVanity
     ) private returns (uint256 projectId, address token) {
         uint256 walletCap = config.walletCapTokens * 1 ether;
-        uint256 launchThreshold = config.launchThresholdBnb * 1 ether;
+        uint256 launchThreshold = config.launchThresholdBnb;
         if (config.walletCapEnabled) {
             require(walletCap >= MIN_WALLET_CAP && walletCap <= MAX_WALLET_CAP, "LAUNCHPAD: cap 1-100");
         } else {
             require(config.walletCapTokens == 0, "LAUNCHPAD: disabled cap");
             walletCap = 0;
         }
-        require(launchThreshold >= MIN_LAUNCH_THRESHOLD && launchThreshold <= MAX_LAUNCH_THRESHOLD, "LAUNCHPAD: threshold 3-8");
+        require(launchThreshold >= MIN_LAUNCH_THRESHOLD && launchThreshold <= MAX_LAUNCH_THRESHOLD, "LAUNCHPAD: threshold 0.05-8");
         _validateTaxSettings(taxConfig.taxEnabled, taxConfig.projectTaxBps, taxConfig.allocation);
         if (taxConfig.taxEnabled && taxConfig.allocation.marketingBps > 0) {
             require(config.marketingWallet != address(0), "LAUNCHPAD: zero marketing wallet");

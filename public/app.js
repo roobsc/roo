@@ -200,6 +200,13 @@ const LAUNCHPAD_ABI = [
   },
   {
     inputs: [],
+    name: "MIN_LAUNCH_THRESHOLD",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
     name: "projectCount",
     outputs: [{ name: "", type: "uint256" }],
     stateMutability: "view",
@@ -595,13 +602,13 @@ function getVisibleProjects() {
     .filter((project) => {
       const threshold = parseLaunchThreshold(project);
       if (state.hardCapFilter === "low") {
-        return threshold >= 3 && threshold <= 4;
+        return threshold > 0 && threshold <= 4;
       }
       if (state.hardCapFilter === "mid") {
-        return threshold >= 5 && threshold <= 6;
+        return threshold > 4 && threshold <= 6;
       }
       if (state.hardCapFilter === "high") {
-        return threshold >= 7;
+        return threshold > 6;
       }
       return true;
     })
@@ -1477,7 +1484,8 @@ function updateCreateState() {
 
   state.walletCapEnabled = $("#walletCapEnabled").checked;
   state.cap = clampNumber($("#walletCap").value, 1, 100);
-  state.threshold = clampNumber($("#launchThreshold").value, 3, 8);
+  state.threshold = clampNumber($("#launchThreshold").value, 0.05, 8);
+  state.threshold = Number(state.threshold.toFixed(2));
 
   $("#walletCapSettings").hidden = !state.walletCapEnabled;
   $("#walletCap").value = state.cap;
@@ -1500,7 +1508,7 @@ function updateCreateState() {
     capCheck.checked = !state.walletCapEnabled || (state.cap >= 1 && state.cap <= 100);
   }
   if (thresholdCheck) {
-    thresholdCheck.checked = state.threshold >= 3 && state.threshold <= 8;
+    thresholdCheck.checked = state.threshold >= 0.05 && state.threshold <= 8;
   }
 
   renderStepPills();
@@ -1530,6 +1538,7 @@ function buildCreateParams(fallbackWallet = "") {
     walletCapEnabled: state.walletCapEnabled,
     maxWalletBuyTokens: state.walletCapEnabled ? String(state.cap) : "0",
     launchThresholdBnb: String(state.threshold),
+    launchThresholdWei: window.ethers ? ethers.parseEther(String(state.threshold)).toString() : "",
     marketingWallet,
     metadata: buildMetadata(),
     launchpadAddress: config.launchpadAddress || "待填写",
@@ -1683,6 +1692,28 @@ function parseProjectCreated(receipt, contract) {
   return null;
 }
 
+async function getLaunchThresholdArgument(launchpad, thresholdBnb) {
+  const thresholdWei = ethers.parseEther(String(thresholdBnb));
+  try {
+    const minThreshold = await launchpad.MIN_LAUNCH_THRESHOLD();
+    if (minThreshold <= ethers.parseEther("0.05")) {
+      return thresholdWei;
+    }
+    if (thresholdWei < minThreshold) {
+      throw new Error(`当前发射台合约最低阈值是 ${ethers.formatEther(minThreshold)} BNB。0.05 BNB 测试需要先部署新版测试合约，并把 config.js 的 launchpadAddress 换成新地址。`);
+    }
+    return BigInt(String(thresholdBnb));
+  } catch (error) {
+    if (String(error.message || "").includes("新版测试合约")) {
+      throw error;
+    }
+    if (thresholdWei < ethers.parseEther("3")) {
+      throw new Error("当前发射台合约可能还是旧版本，最低 3 BNB。0.05 BNB 测试需要先部署新版测试合约，并更新 config.js 的 launchpadAddress。");
+    }
+    return BigInt(String(thresholdBnb));
+  }
+}
+
 async function handleCreateToken() {
   const buttons = [$("#createTokenButton"), $("#createTokenButtonSecondary")];
   buttons.forEach((button) => {
@@ -1700,6 +1731,7 @@ async function handleCreateToken() {
     const provider = new ethers.BrowserProvider(window.ethereum);
     const signer = await provider.getSigner();
     const launchpad = new ethers.Contract(config.launchpadAddress, LAUNCHPAD_ABI, signer);
+    const launchThresholdArgument = await getLaunchThresholdArgument(launchpad, params.launchThresholdBnb);
     setCreateStatus("正在生成尾号 0000 的代币合约地址...", "");
     const vanity = await findVanitySalt(params, wallet);
     setCreateStatus(`已找到尾号 0000 的预测地址：${vanity.predicted}，正在唤起钱包确认创建交易。`, "");
@@ -1715,7 +1747,7 @@ async function handleCreateToken() {
       params.symbol,
       params.walletCapEnabled,
       BigInt(params.maxWalletBuyTokens),
-      BigInt(params.launchThresholdBnb),
+      launchThresholdArgument,
       params.marketingWallet
     ];
     const projectTaxConfig = [

@@ -518,6 +518,7 @@ button {
   align-items: center;
   gap: 8px;
   min-width: max-content;
+  white-space: nowrap;
   color: var(--text);
   font-weight: 900;
 }
@@ -527,16 +528,22 @@ button {
   opacity: 0;
 }
 
-.listed-toggle span {
+.listed-toggle strong {
+  display: inline-block;
+  line-height: 1.2;
+}
+
+.listed-switch {
   position: relative;
   display: inline-block;
+  flex: 0 0 34px;
   width: 34px;
   height: 20px;
   border-radius: 999px;
   background: #767676;
 }
 
-.listed-toggle span::after {
+.listed-switch::after {
   content: "";
   position: absolute;
   top: 3px;
@@ -548,11 +555,11 @@ button {
   transition: transform 160ms ease;
 }
 
-.listed-toggle input:checked + span {
+.listed-toggle input:checked + .listed-switch {
   background: var(--green);
 }
 
-.listed-toggle input:checked + span::after {
+.listed-toggle input:checked + .listed-switch::after {
   transform: translateX(14px);
   background: #050505;
 }
