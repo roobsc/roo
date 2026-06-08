@@ -1289,66 +1289,26 @@ function normalizeChartCandles(rawCandles = [], fallbackPrice = 0) {
     .sort((a, b) => a.time - b.time);
 
   if (!sorted.length && fallbackPrice > 0) {
-    const now = Date.now();
-    return Array.from({ length: 18 }, (_, index) => ({
-      time: now - (17 - index) * 60_000,
+    return [{
+      time: Date.now(),
       open: fallbackPrice,
       high: fallbackPrice,
       low: fallbackPrice,
       close: fallbackPrice,
-      volume: 0,
-      synthetic: true
-    }));
+      volume: 0
+    }];
   }
 
-  if (!sorted.length) {
-    return [];
-  }
-
-  const interval = sorted.length > 1
-    ? Math.max(60_000, Math.min(300_000, sorted[1].time - sorted[0].time || 60_000))
-    : 60_000;
-  const filled = [];
-  sorted.forEach((candle, index) => {
-    const previous = filled[filled.length - 1];
-    if (previous) {
-      const gap = Math.floor((candle.time - previous.time) / interval);
-      const fillers = Math.min(18, Math.max(0, gap - 1));
-      for (let offset = 1; offset <= fillers; offset += 1) {
-        filled.push({
-          time: previous.time + interval * offset,
-          open: previous.close,
-          high: previous.close,
-          low: previous.close,
-          close: previous.close,
-          volume: 0,
-          synthetic: true
-        });
-      }
-    }
-    const open = index === 0 ? candle.open || candle.close : candle.open || filled[filled.length - 1].close;
-    filled.push({
+  return sorted.map((candle, index) => {
+    const previous = sorted[index - 1];
+    const open = candle.open || previous?.close || candle.close;
+    return {
       ...candle,
       open,
       high: Math.max(candle.high || candle.close, open, candle.close),
       low: Math.min(candle.low || candle.close, open, candle.close)
-    });
+    };
   });
-
-  while (filled.length < 18) {
-    const first = filled[0];
-    filled.unshift({
-      time: first.time - interval,
-      open: first.open,
-      high: first.open,
-      low: first.open,
-      close: first.open,
-      volume: 0,
-      synthetic: true
-    });
-  }
-
-  return filled;
 }
 
 function formatChartPrice(value) {
@@ -1358,6 +1318,17 @@ function formatChartPrice(value) {
 function toChartTimestamp(time) {
   const value = Number(time || Date.now());
   return Math.floor((value > 1_000_000_000_000 ? value : value * 1000) / 1000);
+}
+
+function compactSparseChartTimes(candles) {
+  if (candles.length > 12) {
+    return candles;
+  }
+  const lastTime = candles[candles.length - 1]?.time || Date.now();
+  return candles.map((candle, index) => ({
+    ...candle,
+    time: lastTime - (candles.length - 1 - index) * 60_000
+  }));
 }
 
 function ensureTradeChart(container) {
@@ -1396,9 +1367,9 @@ function ensureTradeChart(container) {
       borderColor: "rgba(255, 255, 255, 0.12)",
       timeVisible: true,
       secondsVisible: false,
-      rightOffset: 8,
-      barSpacing: 9,
-      minBarSpacing: 4
+      rightOffset: 6,
+      barSpacing: 18,
+      minBarSpacing: 6
     },
     localization: {
       priceFormatter: formatChartPrice
@@ -1458,14 +1429,15 @@ function drawTradeChart(project = {}, backendCandles = null) {
     return;
   }
 
-  const data = candles.map((candle) => ({
+  const visibleCandles = compactSparseChartTimes(candles);
+  const data = visibleCandles.map((candle) => ({
     time: toChartTimestamp(candle.time),
     open: Number(candle.open),
     high: Number(candle.high),
     low: Number(candle.low),
     close: Number(candle.close)
   }));
-  const volumeData = candles.map((candle) => ({
+  const volumeData = visibleCandles.map((candle) => ({
     time: toChartTimestamp(candle.time),
     value: Number(candle.volume || 0),
     color: candle.close >= candle.open ? "rgba(55, 255, 20, 0.34)" : "rgba(255, 59, 48, 0.34)"
@@ -1476,6 +1448,10 @@ function drawTradeChart(project = {}, backendCandles = null) {
 
   chart.candleSeries.setData(data);
   chart.volumeSeries.setData(volumeData);
+  chart.chart.timeScale().applyOptions({
+    rightOffset: candles.length <= 12 ? 10 : 6,
+    barSpacing: candles.length <= 12 ? 28 : 18
+  });
   chart.chart.timeScale().fitContent();
 
   const coordinate = chart.candleSeries.priceToCoordinate(last);
