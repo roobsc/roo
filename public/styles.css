@@ -43,6 +43,10 @@ body {
   min-height: 100%;
 }
 
+* {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
   min-width: 320px;
@@ -2778,22 +2782,52 @@ select {
 }
 
 @media (max-width: 760px) {
+  html,
+  body {
+    width: 100%;
+    overflow-x: hidden;
+  }
+
   .app-shell {
+    width: 100%;
+    max-width: 100vw;
     padding-left: 0;
+    overflow-x: hidden;
   }
 
   .rail-nav {
     display: none;
   }
 
+  .ticker {
+    display: none;
+  }
+
   .topbar {
     position: static;
-    flex-wrap: wrap;
-    padding: 12px;
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr);
+    gap: 10px;
+    width: 100%;
+    max-width: 100vw;
+    padding: 10px;
+  }
+
+  .brand {
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .brand strong {
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .tabs,
   .top-actions {
+    grid-column: 1 / -1;
     width: 100%;
   }
 
@@ -2803,12 +2837,14 @@ select {
 
   .top-actions {
     margin-left: 0;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: minmax(42px, 0.32fr) minmax(92px, 0.9fr) minmax(130px, 1.1fr);
+    gap: 8px;
   }
 
   .top-actions button,
   .tab {
-    flex: 1;
+    min-width: 0;
   }
 
   .language-toggle {
@@ -2831,18 +2867,37 @@ select {
   }
 
   .market-home {
-    width: calc(100vw - 24px);
-    padding-top: 24px;
+    width: 100%;
+    max-width: 100vw;
+    margin: 0;
+    padding: 16px 10px 28px;
+    overflow-x: hidden;
+  }
+
+  .market-hero {
+    width: 100%;
+    min-height: 0;
+    gap: 14px;
+    margin-bottom: 18px;
   }
 
   .roo-console {
+    width: 100%;
+    max-width: 100%;
     padding: 12px;
+    border-radius: 18px;
+  }
+
+  .roo-console::before {
+    width: 220px;
+    min-width: 0;
+    opacity: 0.42;
   }
 
   .kangaroo-silhouette {
     top: -30px;
-    right: -180px;
-    width: 430px;
+    right: -150px;
+    width: 320px;
     min-width: 0;
     opacity: 0.28;
   }
@@ -2857,11 +2912,24 @@ select {
   }
 
   .roo-console-copy h1 {
-    font-size: 42px;
+    font-size: 34px;
+    line-height: 1.06;
+  }
+
+  .roo-console-copy p {
+    font-size: 16px;
+    line-height: 1.65;
   }
 
   .roo-search-hub {
+    width: 100%;
+    max-width: 100%;
     padding: 12px;
+  }
+
+  .market-search {
+    width: 100%;
+    max-width: 100%;
   }
 
   .project-card {
