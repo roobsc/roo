@@ -356,6 +356,7 @@ const state = {
   listedOnly: false,
   selectedProject: null,
   tradeView: "chart",
+  chartInterval: "1m",
   swapSide: "buy",
   buyInputMode: "bnb",
   mevProtection: false,
@@ -1834,6 +1835,18 @@ function buildCandlesFromTrades(trades, bucketMs = 60_000) {
   return Array.from(buckets.values()).sort((a, b) => a.time - b.time);
 }
 
+function chartIntervalToMs(interval) {
+  const map = {
+    "1m": 60_000,
+    "5m": 300_000,
+    "15m": 900_000,
+    "1h": 3_600_000,
+    "4h": 14_400_000,
+    "1d": 86_400_000
+  };
+  return map[interval] || map["1m"];
+}
+
 async function estimateSwapReceive() {
   const project = state.selectedProject;
   if (!project) {
@@ -2316,6 +2329,16 @@ function setTradeView(view) {
   });
 }
 
+function setChartInterval(interval) {
+  state.chartInterval = interval || "1m";
+  $$("[data-chart-interval]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.chartInterval === state.chartInterval);
+  });
+  if (state.selectedProject) {
+    refreshTradeData(state.selectedProject);
+  }
+}
+
 function renderHolderList(project, trades = []) {
   const symbol = project.symbol || "";
   const totalSupply = Math.max(0, Number(project.totalSupply || TOTAL_TOKEN_SUPPLY));
@@ -2355,12 +2378,13 @@ async function refreshTradeData(project) {
     return;
   }
   try {
+    const interval = state.chartInterval || "1m";
     const [tradesData, candlesData] = await Promise.all([
       apiGet(`/api/trades?projectId=${encodeURIComponent(project.projectId)}&token=${encodeURIComponent(project.contract || "")}`),
-      apiGet(`/api/candles?projectId=${encodeURIComponent(project.projectId)}&token=${encodeURIComponent(project.contract || "")}&interval=1m`)
+      apiGet(`/api/candles?projectId=${encodeURIComponent(project.projectId)}&token=${encodeURIComponent(project.contract || "")}&interval=${encodeURIComponent(interval)}`)
     ]);
     const trades = tradesData.trades || [];
-    const candles = (candlesData.candles || []).length ? candlesData.candles : buildCandlesFromTrades(trades);
+    const candles = (candlesData.candles || []).length ? candlesData.candles : buildCandlesFromTrades(trades, chartIntervalToMs(interval));
     const holderCount = computeHoldersFromTrades(trades).length;
     if (Number(project.holders || 0) !== holderCount) {
       project.holders = holderCount;
@@ -3180,6 +3204,9 @@ function bindEvents() {
   });
   $$("[data-trade-view]").forEach((button) => {
     button.addEventListener("click", () => setTradeView(button.dataset.tradeView));
+  });
+  $$("[data-chart-interval]").forEach((button) => {
+    button.addEventListener("click", () => setChartInterval(button.dataset.chartInterval));
   });
 
   $("#swapAmount").addEventListener("input", () => {
