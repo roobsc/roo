@@ -377,6 +377,7 @@ let tradeChartApi = null;
 let tradeCandleSeries = null;
 let tradeVolumeSeries = null;
 let tradeChartResizeObserver = null;
+const projectLaunchpadCache = new Map();
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -512,6 +513,123 @@ function normalizeAddress(address) {
   return String(address || "").toLowerCase();
 }
 
+function getKnownLaunchpadAddresses() {
+  if (!window.ethers) {
+    return [];
+  }
+  const addresses = [
+    config.launchpadAddress,
+    ...(Array.isArray(config.legacyLaunchpadAddresses) ? config.legacyLaunchpadAddresses : [])
+  ];
+  const unique = [];
+  addresses.forEach((address) => {
+    if (!hasConfiguredAddress(address)) {
+      return;
+    }
+    const normalized = normalizeAddress(address);
+    if (!unique.some((item) => normalizeAddress(item) === normalized)) {
+      unique.push(address);
+    }
+  });
+  return unique;
+}
+
+function getProjectLaunchpadAddress(project) {
+  return hasConfiguredAddress(project && project.launchpadAddress)
+    ? project.launchpadAddress
+    : config.launchpadAddress;
+}
+
+async function findProjectOnLaunchpads(tokenAddress, provider, preferredProject = null) {
+  const target = normalizeAddress(tokenAddress);
+  const preferredId = preferredProject && preferredProject.projectId !== undefined && preferredProject.projectId !== null
+    ? BigInt(preferredProject.projectId)
+    : null;
+  const cacheKey = target;
+  if (projectLaunchpadCache.has(cacheKey)) {
+    return projectLaunchpadCache.get(cacheKey);
+  }
+
+  for (const launchpadAddress of getKnownLaunchpadAddresses()) {
+    const launchpad = getLaunchpadContract(provider, launchpadAddress);
+    if (preferredId !== null) {
+      try {
+        const basics = await launchpad.getProjectBasics(preferredId);
+        if (normalizeAddress(basics.token) === target) {
+          const found = {
+            projectId: String(preferredId),
+            launchpadAddress,
+            basics,
+            launchpad
+          };
+          projectLaunchpadCache.set(cacheKey, found);
+          return found;
+        }
+      } catch {
+        // This launchpad does not have the preferred projectId; scan below.
+      }
+    }
+
+    try {
+      const count = Number(await launchpad.projectCount());
+      for (let projectId = 0; projectId < count; projectId += 1) {
+        const basics = await launchpad.getProjectBasics(BigInt(projectId));
+        if (normalizeAddress(basics.token) !== target) {
+          continue;
+        }
+        const found = {
+          projectId: String(projectId),
+          launchpadAddress,
+          basics,
+          launchpad
+        };
+        projectLaunchpadCache.set(cacheKey, found);
+        return found;
+      }
+    } catch {
+      // Keep trying the remaining known launchpads.
+    }
+  }
+  return null;
+}
+
+async function ensureProjectLaunchpad(project, signerOrProvider) {
+  if (!project || !window.ethers || !ethers.isAddress(project.contract || "")) {
+    return project;
+  }
+  const launchpadAddress = getProjectLaunchpadAddress(project);
+  if (hasConfiguredAddress(launchpadAddress)) {
+    try {
+      const launchpad = getLaunchpadContract(signerOrProvider, launchpadAddress);
+      const basics = await launchpad.getProjectBasics(BigInt(project.projectId));
+      if (normalizeAddress(basics.token) === normalizeAddress(project.contract)) {
+        project.launchpadAddress = launchpadAddress;
+        return project;
+      }
+    } catch {
+      // Fall through and try all known launchpads.
+    }
+  }
+
+  const found = await findProjectOnLaunchpads(project.contract, signerOrProvider, project);
+  if (!found) {
+    return project;
+  }
+  const updated = {
+    ...project,
+    projectId: found.projectId,
+    launchpadAddress: found.launchpadAddress
+  };
+  const index = projects.findIndex((item) => normalizeAddress(item.contract) === normalizeAddress(project.contract));
+  if (index >= 0) {
+    projects[index] = { ...projects[index], ...updated };
+    state.selectedProject = projects[index];
+    apiPost("/api/projects/upsert", projects[index]).catch(() => {});
+    return projects[index];
+  }
+  return updated;
+}
+
 function upsertLocalProject(project) {
   const key = project.contract
     ? (item) => normalizeAddress(item.contract) === normalizeAddress(project.contract)
@@ -558,7 +676,7 @@ async function readCurrentPriceBnb(projectId, launchpad, fallbackPrice = 0) {
   }
 }
 
-async function buildProjectFromChain(projectId, basics, provider, launchpadContract = null) {
+async function buildProjectFromChain(projectId, basics, provider, launchpadContract = null, launchpadAddress = config.launchpadAddress) {
   const token = new ethers.Contract(basics.token, ERC20_ABI, provider);
   let name = `Project ${projectId}`;
   let symbol = `P${projectId}`;
@@ -602,6 +720,7 @@ async function buildProjectFromChain(projectId, basics, provider, launchpadContr
     priceBnb,
     creator: basics.creator,
     contract: basics.token,
+    launchpadAddress,
     change: 0,
     listed: launched,
     avatar: symbol.slice(0, 1).toUpperCase()
@@ -623,7 +742,7 @@ async function syncChainProjects(limit = 120) {
     for (let projectId = count - 1; projectId >= start; projectId -= 1) {
       try {
         const basics = await launchpad.getProjectBasics(BigInt(projectId));
-        const chainProject = await buildProjectFromChain(projectId, basics, provider, launchpad);
+        const chainProject = await buildProjectFromChain(projectId, basics, provider, launchpad, config.launchpadAddress);
         upsertLocalProject(chainProject);
       } catch {
         // Keep syncing the rest even if one historical project cannot be read.
@@ -649,6 +768,11 @@ async function findProjectByTokenAddress(tokenAddress) {
   const provider = window.ethereum
     ? new ethers.BrowserProvider(window.ethereum)
     : new ethers.JsonRpcProvider(config.rpcUrl || "https://bsc-dataseed.binance.org");
+  const found = await findProjectOnLaunchpads(tokenAddress, provider);
+  if (found) {
+    const project = await buildProjectFromChain(found.projectId, found.basics, provider, found.launchpad, found.launchpadAddress);
+    return upsertLocalProject(project);
+  }
   const launchpad = getLaunchpadContract(provider);
   const count = Number(await launchpad.projectCount());
   const target = normalizeAddress(tokenAddress);
@@ -1702,30 +1826,31 @@ async function estimateSwapReceive() {
       const provider = window.ethereum
         ? new ethers.BrowserProvider(window.ethereum)
         : new ethers.JsonRpcProvider(config.rpcUrl || "https://bsc-dataseed.binance.org");
-      const launchpad = getLaunchpadContract(provider);
+      const tradeProject = await ensureProjectLaunchpad(project, provider);
+      const launchpad = getLaunchpadContract(provider, getProjectLaunchpadAddress(tradeProject));
       if (state.swapSide === "buy") {
-        const capMaxTokenAmount = ethers.parseEther(String(isWalletCapEnabled(project) ? project.cap : INTERNAL_SALE_SUPPLY));
-        const maxTokenAmount = await getBuySearchUpperBound(project, provider, capMaxTokenAmount);
+        const capMaxTokenAmount = ethers.parseEther(String(isWalletCapEnabled(tradeProject) ? tradeProject.cap : INTERNAL_SALE_SUPPLY));
+        const maxTokenAmount = await getBuySearchUpperBound(tradeProject, provider, capMaxTokenAmount);
         if (state.buyInputMode === "token") {
           let tokenAmount = ethers.parseEther(String(amount));
           if (tokenAmount > maxTokenAmount) {
             tokenAmount = maxTokenAmount;
             $("#buyTokenAmount").value = Number(ethers.formatEther(tokenAmount)).toFixed(6);
           }
-          const cost = await launchpad.quoteBuy(BigInt(project.projectId), tokenAmount);
+          const cost = await launchpad.quoteBuy(BigInt(tradeProject.projectId), tokenAmount);
           $("#swapAmount").value = Number(ethers.formatEther(cost)).toFixed(6);
           $("#swapReceive").textContent = `预计支付: ${Number(ethers.formatEther(cost)).toFixed(6)} BNB`;
           return;
         }
         const bnbAmount = ethers.parseEther(String(amount));
-        const estimated = await estimateTokenAmountForBnb(launchpad, BigInt(project.projectId), bnbAmount, maxTokenAmount);
+        const estimated = await estimateTokenAmountForBnb(launchpad, BigInt(tradeProject.projectId), bnbAmount, maxTokenAmount);
         if (estimated > 0n) {
           $("#swapReceive").textContent = `您将收到: ${Number(ethers.formatEther(estimated)).toFixed(6)} ${project.symbol}`;
           return;
         }
       } else {
         const tokenAmount = ethers.parseEther(String(amount));
-        const estimatedBnb = await launchpad.quoteSell(BigInt(project.projectId), tokenAmount);
+        const estimatedBnb = await launchpad.quoteSell(BigInt(tradeProject.projectId), tokenAmount);
         $("#swapReceive").textContent = `您将收到: ${Number(ethers.formatEther(estimatedBnb)).toFixed(6)} BNB`;
         return;
       }
@@ -1777,8 +1902,9 @@ async function updateBuyCapQuote(project = state.selectedProject) {
     const provider = window.ethereum
       ? new ethers.BrowserProvider(window.ethereum)
       : new ethers.JsonRpcProvider(config.rpcUrl || "https://bsc-dataseed.binance.org");
-    const launchpad = getLaunchpadContract(provider);
-    const cost = await launchpad.quoteBuy(BigInt(project.projectId), ethers.parseEther(String(capTokens)));
+    const tradeProject = await ensureProjectLaunchpad(project, provider);
+    const launchpad = getLaunchpadContract(provider, getProjectLaunchpadAddress(tradeProject));
+    const cost = await launchpad.quoteBuy(BigInt(tradeProject.projectId), ethers.parseEther(String(capTokens)));
     const formattedCost = Number(ethers.formatEther(cost)).toFixed(6);
     element.textContent = `${capTokens} 枚预计需要 ${formattedCost} BNB`;
     if (state.swapSide === "buy" && state.buyInputMode === "token" && Number($("#buyTokenAmount").value || 0) === capTokens) {
@@ -1830,6 +1956,7 @@ function addCreatedProject(params, created) {
     creator: state.wallet ? shortAddress(state.wallet) : "当前钱包",
     contract: created.token,
     projectId: created.projectId,
+    launchpadAddress: config.launchpadAddress,
     change: 0,
     listed: false,
     avatar: params.symbol.slice(0, 1),
@@ -1860,8 +1987,8 @@ async function autoVerifyCreatedToken(params, created) {
   }
 }
 
-function getLaunchpadContract(signerOrProvider) {
-  return new ethers.Contract(config.launchpadAddress, LAUNCHPAD_ABI, signerOrProvider);
+function getLaunchpadContract(signerOrProvider, launchpadAddress = config.launchpadAddress) {
+  return new ethers.Contract(launchpadAddress, LAUNCHPAD_ABI, signerOrProvider);
 }
 
 async function getTradeSigner() {
@@ -1902,11 +2029,12 @@ async function estimateTokenAmountForBnb(launchpad, projectId, maxBnbAmount, max
 }
 
 async function readInternalSaleRemaining(project, signerOrProvider) {
-  if (!project || project.projectId === undefined || project.projectId === null || !window.ethers || !hasConfiguredAddress(config.launchpadAddress)) {
+  const launchpadAddress = getProjectLaunchpadAddress(project);
+  if (!project || project.projectId === undefined || project.projectId === null || !window.ethers || !hasConfiguredAddress(launchpadAddress)) {
     return ethers.parseEther(String(INTERNAL_SALE_SUPPLY));
   }
   try {
-    const launchpad = getLaunchpadContract(signerOrProvider);
+    const launchpad = getLaunchpadContract(signerOrProvider, launchpadAddress);
     const basics = await launchpad.getProjectBasics(BigInt(project.projectId));
     const tokensSold = Number(ethers.formatEther(basics.tokensSold || 0n));
     const remaining = Math.max(0, INTERNAL_SALE_SUPPLY - tokensSold);
@@ -1971,17 +2099,19 @@ async function handleSwapSubmit() {
     button.disabled = true;
     button.textContent = state.swapSide === "buy" ? "购买中..." : "卖出中...";
     const { signer } = await getTradeSigner();
-    const launchpad = getLaunchpadContract(signer);
+    const tradeProject = await ensureProjectLaunchpad(project, signer);
+    const tradeLaunchpadAddress = getProjectLaunchpadAddress(tradeProject);
+    const launchpad = getLaunchpadContract(signer, tradeLaunchpadAddress);
 
     if (state.swapSide === "buy") {
-      const capMaxTokenAmount = ethers.parseEther(String(isWalletCapEnabled(project) ? project.cap : INTERNAL_SALE_SUPPLY));
-      const maxTokenAmount = await getBuySearchUpperBound(project, signer, capMaxTokenAmount);
+      const capMaxTokenAmount = ethers.parseEther(String(isWalletCapEnabled(tradeProject) ? tradeProject.cap : INTERNAL_SALE_SUPPLY));
+      const maxTokenAmount = await getBuySearchUpperBound(tradeProject, signer, capMaxTokenAmount);
       let tokenAmount;
       if (state.buyInputMode === "token") {
         tokenAmount = ethers.parseEther(String(rawAmount));
       } else {
         const bnbAmount = ethers.parseEther(String(rawAmount));
-        tokenAmount = await estimateTokenAmountForBnb(launchpad, BigInt(project.projectId), bnbAmount, maxTokenAmount);
+        tokenAmount = await estimateTokenAmountForBnb(launchpad, BigInt(tradeProject.projectId), bnbAmount, maxTokenAmount);
       }
       if (tokenAmount === undefined) {
         throw new Error("报价异常，无法计算买入数量。");
@@ -1993,7 +2123,7 @@ async function handleSwapSubmit() {
         tokenAmount = maxTokenAmount;
       }
       const slippageBps = BigInt(Math.round(Number(state.slippagePercent || 0) * 100));
-      const executable = await findExecutableBuyQuote(launchpad, BigInt(project.projectId), tokenAmount, slippageBps);
+      const executable = await findExecutableBuyQuote(launchpad, BigInt(tradeProject.projectId), tokenAmount, slippageBps);
       if (!executable || executable.tokenAmount <= 0n) {
         throw new Error("这个项目内盘已卖完，不能继续买入。");
       }
@@ -2002,43 +2132,43 @@ async function handleSwapSubmit() {
       }
       tokenAmount = executable.tokenAmount;
       const cost = executable.cost;
-      const tx = await launchpad.buy(BigInt(project.projectId), tokenAmount, { value: executable.value });
+      const tx = await launchpad.buy(BigInt(tradeProject.projectId), tokenAmount, { value: executable.value });
       $("#swapReceive").textContent = `购买交易已提交：${tx.hash}`;
       await tx.wait();
-      await saveBackendTrade(project, {
+      await saveBackendTrade(tradeProject, {
         side: "buy",
         txHash: tx.hash,
         bnbAmount: Number(ethers.formatEther(cost)),
         tokenAmount: Number(ethers.formatEther(tokenAmount))
       });
       $("#swapReceive").textContent = `购买成功：${ethers.formatEther(tokenAmount)} ${project.symbol}`;
-      await refreshTradeData(project);
+      await refreshTradeData(tradeProject);
       return;
     }
 
     const tokenAmount = ethers.parseEther(String(rawAmount));
-    const estimatedBnb = await launchpad.quoteSell(BigInt(project.projectId), tokenAmount);
-    const token = new ethers.Contract(project.contract, ERC20_ABI, signer);
+    const estimatedBnb = await launchpad.quoteSell(BigInt(tradeProject.projectId), tokenAmount);
+    const token = new ethers.Contract(tradeProject.contract, ERC20_ABI, signer);
     const owner = await signer.getAddress();
-    const allowance = await token.allowance(owner, config.launchpadAddress);
+    const allowance = await token.allowance(owner, tradeLaunchpadAddress);
     if (allowance < tokenAmount) {
       button.textContent = "授权中...";
-      const approveTx = await token.approve(config.launchpadAddress, tokenAmount);
+      const approveTx = await token.approve(tradeLaunchpadAddress, tokenAmount);
       $("#swapReceive").textContent = `授权交易已提交：${approveTx.hash}`;
       await approveTx.wait();
     }
     button.textContent = "卖出中...";
-    const tx = await launchpad.sell(BigInt(project.projectId), tokenAmount);
+    const tx = await launchpad.sell(BigInt(tradeProject.projectId), tokenAmount);
     $("#swapReceive").textContent = `卖出交易已提交：${tx.hash}`;
     await tx.wait();
-    await saveBackendTrade(project, {
+    await saveBackendTrade(tradeProject, {
       side: "sell",
       txHash: tx.hash,
       bnbAmount: Number(ethers.formatEther(estimatedBnb)),
       tokenAmount: Number(ethers.formatEther(tokenAmount))
     });
     $("#swapReceive").textContent = `卖出成功，预估返回 ${ethers.formatEther(estimatedBnb)} BNB`;
-    await refreshTradeData(project);
+    await refreshTradeData(tradeProject);
   } catch (error) {
     let message = error && (error.shortMessage || error.reason || error.message)
       ? (error.shortMessage || error.reason || error.message)
