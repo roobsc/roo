@@ -3,6 +3,10 @@ const defaultAvatar = "./assets/roo-avatar.jpg";
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const TOTAL_TOKEN_SUPPLY = 10_000;
 const INTERNAL_SALE_SUPPLY = 8_000;
+const WBNB_ADDRESS = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c";
+const USDT_ADDRESS = "0x55d398326f99059fF775485246999027B3197955";
+const PANCAKE_V2_FACTORY = "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73";
+const BNB_USD_FALLBACK = Number(config.bnbUsd || 600);
 
 const LAUNCHPAD_ABI = [
   {
@@ -365,6 +369,47 @@ const ERC20_ABI = [
   }
 ];
 
+const PANCAKE_FACTORY_ABI = [
+  {
+    inputs: [
+      { name: "tokenA", type: "address" },
+      { name: "tokenB", type: "address" }
+    ],
+    name: "getPair",
+    outputs: [{ name: "pair", type: "address" }],
+    stateMutability: "view",
+    type: "function"
+  }
+];
+
+const PANCAKE_PAIR_ABI = [
+  {
+    inputs: [],
+    name: "getReserves",
+    outputs: [
+      { name: "reserve0", type: "uint112" },
+      { name: "reserve1", type: "uint112" },
+      { name: "blockTimestampLast", type: "uint32" }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "token0",
+    outputs: [{ name: "", type: "address" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "token1",
+    outputs: [{ name: "", type: "address" }],
+    stateMutability: "view",
+    type: "function"
+  }
+];
+
 const state = {
   wallet: "",
   cap: Number(config.defaultBuyCapTokens || 25),
@@ -392,6 +437,9 @@ const state = {
   slippagePercent: 15,
   selectedTokenBalance: 0,
   chainSyncing: false,
+  rankingLoading: false,
+  rankingMode: "marketCap",
+  rankingItems: [],
   taxEnabled: false,
   projectTaxRate: 1,
   taxes: {
@@ -542,6 +590,10 @@ async function refreshProjectHolderCounts(limit = 80) {
 
 function normalizeAddress(address) {
   return String(address || "").toLowerCase();
+}
+
+function isSameAddress(a, b) {
+  return normalizeAddress(a) === normalizeAddress(b);
 }
 
 function getKnownLaunchpadAddresses() {
@@ -698,6 +750,61 @@ function getProjectStage(launched, progress) {
   return "new";
 }
 
+function getDisplayProgress(project) {
+  if (!project) {
+    return 0;
+  }
+  if (project.listed || project.stage === "launched") {
+    return 100;
+  }
+  return Math.min(100, Number(project.progress || 0));
+}
+
+function renderLeaderboardPanel() {
+  const panel = $("#treasuryPanel");
+  if (!panel || panel.dataset.leaderboardReady === "1") {
+    return;
+  }
+  panel.setAttribute("aria-label", "Leaderboard");
+  panel.innerHTML = `
+    <div class="leaderboard-layout">
+      <div class="leaderboard-shell">
+        <div class="leaderboard-head">
+          <div class="leaderboard-tabs">
+            <button class="active" type="button" data-rank-mode="marketCap" data-i18n="rankMarketCap">${t("rankMarketCap")}</button>
+            <button type="button" data-rank-mode="volume24h" data-i18n="rankVolume24h">${t("rankVolume24h")}</button>
+          </div>
+          <button id="refreshRankingButton" class="rank-filter" type="button" data-i18n="rankRefresh">${t("rankRefresh")}</button>
+        </div>
+        <div id="leaderboardList" class="leaderboard-list">
+          <div class="leaderboard-empty">${t("rankLoading")}</div>
+        </div>
+      </div>
+    </div>
+  `;
+  panel.dataset.leaderboardReady = "1";
+  panel.querySelectorAll("[data-rank-mode]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.rankingMode = button.dataset.rankMode || "marketCap";
+      panel.querySelectorAll("[data-rank-mode]").forEach((item) => {
+        item.classList.toggle("active", item === button);
+      });
+      renderRanking();
+    });
+  });
+  $("#refreshRankingButton").addEventListener("click", () => loadRanking(true));
+  $("#leaderboardList").addEventListener("click", (event) => {
+    const row = event.target.closest("[data-rank-token]");
+    if (!row) {
+      return;
+    }
+    const project = projects.find((item) => normalizeAddress(item.contract) === normalizeAddress(row.dataset.rankToken));
+    if (project) {
+      openTradeModal(project);
+    }
+  });
+}
+
 async function readCurrentPriceBnb(projectId, launchpad, fallbackPrice = 0) {
   try {
     const oneTokenCost = await launchpad.quoteBuy(BigInt(projectId), ethers.parseEther("1"));
@@ -729,10 +836,10 @@ async function buildProjectFromChain(projectId, basics, provider, launchpadContr
   const launchpad = launchpadContract || getLaunchpadContract(provider);
   const priceBnb = await readCurrentPriceBnb(projectId, launchpad, averagePriceBnb);
   const marketCap = priceBnb > 0 ? priceBnb * TOTAL_TOKEN_SUPPLY * 600 : bnbRaised * 600;
-  const progress = launchThreshold > 0
+  const launched = Boolean(basics.launched);
+  const progress = launched ? 100 : launchThreshold > 0
     ? Math.min(100, Number(((bnbRaised / launchThreshold) * 100).toFixed(3)))
     : 0;
-  const launched = Boolean(basics.launched);
   return {
     projectId: String(projectId),
     name,
@@ -865,7 +972,8 @@ async function findProjectByTokenAddress(tokenAddress) {
     const averagePriceBnb = tokensSold > 0 ? bnbRaised / tokensSold : 0;
     const priceBnb = await readCurrentPriceBnb(projectId, launchpad, averagePriceBnb);
     const marketCap = priceBnb > 0 ? priceBnb * TOTAL_TOKEN_SUPPLY * 600 : bnbRaised * 600;
-    const progress = launchThreshold > 0 ? Math.min(100, Number(((bnbRaised / launchThreshold) * 100).toFixed(3))) : 0;
+    const launched = Boolean(basics.launched);
+    const progress = launched ? 100 : launchThreshold > 0 ? Math.min(100, Number(((bnbRaised / launchThreshold) * 100).toFixed(3))) : 0;
     return upsertLocalProject({
       projectId: String(projectId),
       name,
@@ -1106,7 +1214,9 @@ function renderProjects() {
     return;
   }
   list.innerHTML = `
-    ${pageProjects.map((project) => `
+    ${pageProjects.map((project) => {
+    const displayProgress = getDisplayProgress(project);
+    return `
     <article class="project-card" data-project-symbol="${project.symbol}">
       <div class="project-thumb">
         ${getProjectAvatarMarkup(project)}
@@ -1143,8 +1253,8 @@ function renderProjects() {
           </div>
         </dl>
         <div class="project-progress-line">
-          <i style="--value: ${project.progress}%"></i>
-          <b>${project.progress}%</b>
+          <i style="--value: ${displayProgress}%"></i>
+          <b>${displayProgress}%</b>
         </div>
         <div class="project-card-footer">
           <span class="badge">${project.status}</span>
@@ -1152,7 +1262,8 @@ function renderProjects() {
         </div>
       </div>
     </article>
-    `).join("")}
+    `;
+  }).join("")}
     ${totalPages > 1 ? `
       <nav class="market-pagination" aria-label="Project pages">
         <button type="button" data-page-action="prev" ${state.marketPage <= 1 ? "disabled" : ""}>${t("previousPage")}</button>
@@ -1188,7 +1299,7 @@ const translations = {
   zh: {
     tabMarket: "市场",
     tabCreate: "创建",
-    tabTreasury: "金库",
+    tabTreasury: "排行榜",
     heroKicker: "roo pouch exchange",
     heroTitle: "袋鼠仓里的公平发射",
     heroCopy: "BSC 限购内盘、满池发射、LP 测试期进入平台钱包。每个新项目先进入 roo 袋鼠仓，靠成交和曲线自己长出来。",
@@ -1321,7 +1432,14 @@ const translations = {
     profileHoldingEmpty: "没有读取到持仓。",
     drawerMarket: "发射台",
     drawerCreate: "创建代币",
-    drawerTreasury: "金库",
+    drawerTreasury: "排行榜",
+    rankMarketCap: "市值排行榜",
+    rankVolume24h: "24小时交易量",
+    rankRefresh: "刷新链上数据",
+    rankLoading: "正在读取链上市值...",
+    rankEmpty: "暂无已发射并上线 Pancake V2 的项目",
+    rankMarketCapLabel: "市值",
+    rankVolumeLabel: "24h 交易量",
     drawerProfile: "个人资料",
     faqTitle: "常见问题",
     faqInternalQuestion: "什么是内盘发射？",
@@ -1354,7 +1472,7 @@ const translations = {
   en: {
     tabMarket: "Market",
     tabCreate: "Create",
-    tabTreasury: "Treasury",
+    tabTreasury: "Ranking",
     heroKicker: "roo pouch exchange",
     heroTitle: "Fair launches from the roo pouch",
     heroCopy: "BSC limited-buy bonding, pool-triggered launch, and platform-held LP during testing. Every project starts inside roo and grows through real trades.",
@@ -1487,7 +1605,14 @@ const translations = {
     profileHoldingEmpty: "No holdings found.",
     drawerMarket: "Launchpad",
     drawerCreate: "Create Token",
-    drawerTreasury: "Treasury",
+    drawerTreasury: "Ranking",
+    rankMarketCap: "Market cap ranking",
+    rankVolume24h: "24h volume",
+    rankRefresh: "Refresh chain data",
+    rankLoading: "Reading on-chain market caps...",
+    rankEmpty: "No launched Pancake V2 projects yet.",
+    rankMarketCapLabel: "Market cap",
+    rankVolumeLabel: "24h volume",
     drawerProfile: "Profile",
     faqTitle: "FAQ",
     faqInternalQuestion: "What is an internal launch?",
@@ -1523,6 +1648,159 @@ function t(key) {
   return (translations[state.language] && translations[state.language][key])
     || translations.zh[key]
     || key;
+}
+
+function getRankingProvider() {
+  if (!window.ethers) {
+    return null;
+  }
+  return window.ethereum
+    ? new ethers.BrowserProvider(window.ethereum)
+    : new ethers.JsonRpcProvider(config.rpcUrl || "https://bsc-dataseed.binance.org");
+}
+
+async function readPancakeMarketData(project, provider, bnbUsd = BNB_USD_FALLBACK) {
+  if (!project || !project.listed || !ethers.isAddress(project.contract || "")) {
+    return null;
+  }
+  const factory = new ethers.Contract(PANCAKE_V2_FACTORY, PANCAKE_FACTORY_ABI, provider);
+  const pairAddress = await factory.getPair(project.contract, WBNB_ADDRESS);
+  if (!hasConfiguredAddress(pairAddress)) {
+    return null;
+  }
+
+  const pair = new ethers.Contract(pairAddress, PANCAKE_PAIR_ABI, provider);
+  const [token0, reserves] = await Promise.all([pair.token0(), pair.getReserves()]);
+  const wbnbIsToken0 = isSameAddress(token0, WBNB_ADDRESS);
+  const reserveBnbRaw = wbnbIsToken0 ? reserves.reserve0 : reserves.reserve1;
+  const reserveTokenRaw = wbnbIsToken0 ? reserves.reserve1 : reserves.reserve0;
+  const reserveBnb = Number(ethers.formatEther(reserveBnbRaw));
+  const reserveToken = Number(ethers.formatEther(reserveTokenRaw));
+  if (!Number.isFinite(reserveBnb) || !Number.isFinite(reserveToken) || reserveBnb <= 0 || reserveToken <= 0) {
+    return null;
+  }
+
+  const priceBnb = reserveBnb / reserveToken;
+  const totalSupply = Number(project.totalSupply || TOTAL_TOKEN_SUPPLY);
+  const marketCap = priceBnb * totalSupply * bnbUsd;
+  const liquidityUsd = reserveBnb * 2 * bnbUsd;
+  return {
+    ...project,
+    pairAddress,
+    priceBnb,
+    marketCap,
+    liquidityUsd,
+    volume24h: Number(project.volume24h || 0)
+  };
+}
+
+async function readBnbUsdPrice(provider) {
+  try {
+    const factory = new ethers.Contract(PANCAKE_V2_FACTORY, PANCAKE_FACTORY_ABI, provider);
+    const pairAddress = await factory.getPair(WBNB_ADDRESS, USDT_ADDRESS);
+    if (!hasConfiguredAddress(pairAddress)) {
+      return BNB_USD_FALLBACK;
+    }
+    const pair = new ethers.Contract(pairAddress, PANCAKE_PAIR_ABI, provider);
+    const [token0, reserves] = await Promise.all([pair.token0(), pair.getReserves()]);
+    const wbnbIsToken0 = isSameAddress(token0, WBNB_ADDRESS);
+    const reserveBnb = Number(ethers.formatEther(wbnbIsToken0 ? reserves.reserve0 : reserves.reserve1));
+    const reserveUsdt = Number(ethers.formatEther(wbnbIsToken0 ? reserves.reserve1 : reserves.reserve0));
+    return reserveBnb > 0 && reserveUsdt > 0 ? reserveUsdt / reserveBnb : BNB_USD_FALLBACK;
+  } catch {
+    return BNB_USD_FALLBACK;
+  }
+}
+
+function renderRanking() {
+  renderLeaderboardPanel();
+  const list = $("#leaderboardList");
+  if (!list) {
+    return;
+  }
+  if (state.rankingLoading) {
+    list.innerHTML = `<div class="leaderboard-empty">${t("rankLoading")}</div>`;
+    return;
+  }
+  const sortKey = state.rankingMode === "volume24h" ? "volume24h" : "marketCap";
+  const items = state.rankingItems
+    .slice()
+    .sort((a, b) => Number(b[sortKey] || 0) - Number(a[sortKey] || 0))
+    .slice(0, 20);
+  if (!items.length) {
+    list.innerHTML = `<div class="leaderboard-empty">${t("rankEmpty")}</div>`;
+    return;
+  }
+  list.innerHTML = items.map((project, index) => {
+    const rank = index + 1;
+    const displayValue = sortKey === "volume24h"
+      ? formatUsd(project.volume24h || 0, 2)
+      : formatUsd(project.marketCap || 0, 2);
+    const rankClass = rank <= 3 ? `rank-top rank-${rank}` : "";
+    return `
+      <button class="leaderboard-row ${rankClass}" type="button" data-rank-token="${escapeAttr(project.contract || "")}">
+        <span class="rank-index">${rank <= 3 ? rank : String(rank).padStart(2, "0")}</span>
+        <span class="rank-avatar">${getProjectAvatarMarkup(project)}</span>
+        <span class="rank-token">
+          <strong>${escapeAttr(project.symbol || project.name || "--")}</strong>
+          <em>${escapeAttr(project.name || project.symbol || "--")}</em>
+        </span>
+        <span class="rank-value">
+          <strong>${displayValue}</strong>
+          <em>${sortKey === "volume24h" ? t("rankVolumeLabel") : t("rankMarketCapLabel")}</em>
+        </span>
+      </button>
+    `;
+  }).join("");
+}
+
+async function loadRanking(force = false) {
+  renderLeaderboardPanel();
+  if (state.rankingLoading) {
+    return;
+  }
+  if (!force && state.rankingItems.length) {
+    renderRanking();
+    return;
+  }
+  state.rankingLoading = true;
+  renderRanking();
+  try {
+    if (!projects.length) {
+      await loadBackendProjects();
+    }
+    await syncChainProjects();
+    const provider = getRankingProvider();
+    if (!provider) {
+      throw new Error("No ethers provider");
+    }
+    const bnbUsd = await readBnbUsdPrice(provider);
+    const launchedProjects = projects
+      .filter((project) => (project.listed || project.stage === "launched") && ethers.isAddress(project.contract || ""))
+      .slice(0, 120);
+    const results = [];
+    for (const project of launchedProjects) {
+      try {
+        const item = await readPancakeMarketData(project, provider, bnbUsd);
+        if (item) {
+          results.push(item);
+          const index = projects.findIndex((candidate) => normalizeAddress(candidate.contract) === normalizeAddress(project.contract));
+          if (index >= 0) {
+            projects[index] = { ...projects[index], ...item };
+          }
+        }
+      } catch {
+        // Ignore pairs that cannot be read.
+      }
+    }
+    state.rankingItems = results
+      .sort((a, b) => Number(b.marketCap || 0) - Number(a.marketCap || 0))
+      .slice(0, 20);
+    renderProjects();
+  } finally {
+    state.rankingLoading = false;
+    renderRanking();
+  }
 }
 
 async function refreshProfile() {
@@ -2551,8 +2829,9 @@ async function refreshOpenTradeProjectFromChain(project) {
     state.selectedProject = freshProject;
     $("#tradeCreator").textContent = `${t("creatorLabelFull")} ${freshProject.creator}`;
     $("#tradeChange").textContent = `+${freshProject.change}%`;
-    $("#bondingValue").textContent = `${freshProject.progress}%`;
-    $("#bondingBar").style.width = `${Math.min(100, Number(freshProject.progress || 0))}%`;
+    const displayProgress = getDisplayProgress(freshProject);
+    $("#bondingValue").textContent = `${displayProgress}%`;
+    $("#bondingBar").style.width = `${displayProgress}%`;
     $("#infoDescription").textContent = freshProject.listed
       ? t("tradeListedDescription")
       : t("tradeInternalDescription");
@@ -2583,8 +2862,9 @@ function openTradeModal(project) {
   $("#tradeCreator").textContent = `${t("creatorLabelFull")} ${project.creator}`;
   $("#tradeChange").textContent = `+${project.change}%`;
   updateTradeStats(project, []);
-  $("#bondingValue").textContent = `${project.progress}%`;
-  $("#bondingBar").style.width = `${Math.min(100, project.progress)}%`;
+  const displayProgress = getDisplayProgress(project);
+  $("#bondingValue").textContent = `${displayProgress}%`;
+  $("#bondingBar").style.width = `${displayProgress}%`;
   $("#infoName").textContent = project.name;
   $("#infoSymbol").textContent = project.symbol;
   $("#infoDescription").textContent = project.listed
@@ -2663,6 +2943,10 @@ function updateTabs(nextTab) {
   });
   if (nextTab === "profile") {
     refreshProfile();
+  }
+  if (nextTab === "treasury") {
+    renderLeaderboardPanel();
+    loadRanking(false);
   }
 }
 
