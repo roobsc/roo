@@ -1045,6 +1045,32 @@ function formatBnb(value, digits = 6) {
   return `${number.toFixed(digits).replace(/\.?0+$/, "")} BNB`;
 }
 
+function normalizeDecimalInput(value) {
+  let text = String(value ?? "").trim().replace(/,/g, "");
+  if (text.startsWith(".")) {
+    text = `0${text}`;
+  }
+  if (text.endsWith(".")) {
+    text = text.slice(0, -1);
+  }
+  return text;
+}
+
+function parsePositiveEtherInput(value) {
+  const text = normalizeDecimalInput(value);
+  if (!text) {
+    return null;
+  }
+  if (!/^\d+(\.\d{0,18})?$/.test(text)) {
+    throw new Error("请输入正确的数量，最多支持 18 位小数。");
+  }
+  const wei = ethers.parseEther(text);
+  if (wei <= 0n) {
+    return null;
+  }
+  return { text, wei };
+}
+
 function estimateInitialBuyTokens(bnbAmount, params) {
   const bnb = Number(bnbAmount || 0);
   const launchThreshold = Number(params.launchThresholdBnb || state.threshold || 0);
@@ -1225,8 +1251,8 @@ function renderProjects() {
       <div class="project-body">
         <div class="project-title-row">
           <div>
-            <h3>${project.name}</h3>
-            <span class="token-kind">${project.symbol} / BSC</span>
+            <h3>${project.symbol}</h3>
+            <span class="token-kind">${project.name} / BSC</span>
           </div>
           <strong class="change-badge">+${project.change}%</strong>
         </div>
@@ -2222,11 +2248,13 @@ async function estimateSwapReceive() {
     $("#swapReceive").textContent = "这个项目还没有同步到链上 projectId，暂时不能交易。";
     return;
   }
-  const bnbInputAmount = Math.max(0, Number($("#swapAmount").value || 0));
-  const tokenInputAmount = Math.max(0, Number($("#buyTokenAmount").value || 0));
-  const amount = state.swapSide === "buy" && state.buyInputMode === "token" ? tokenInputAmount : bnbInputAmount;
+  const swapAmountText = normalizeDecimalInput($("#swapAmount").value);
+  const buyTokenAmountText = normalizeDecimalInput($("#buyTokenAmount").value);
+  const amount = state.swapSide === "buy" && state.buyInputMode === "token"
+    ? Math.max(0, Number(buyTokenAmountText || 0))
+    : Math.max(0, Number(swapAmountText || 0));
   try {
-    if (window.ethers && amount > 0) {
+    if (window.ethers && (swapAmountText || buyTokenAmountText)) {
       const provider = window.ethereum
         ? new ethers.BrowserProvider(window.ethereum)
         : new ethers.JsonRpcProvider(config.rpcUrl || "https://bsc-dataseed.binance.org");
@@ -2236,7 +2264,11 @@ async function estimateSwapReceive() {
         const capMaxTokenAmount = ethers.parseEther(String(isWalletCapEnabled(tradeProject) ? tradeProject.cap : INTERNAL_SALE_SUPPLY));
         const maxTokenAmount = await getBuySearchUpperBound(tradeProject, provider, capMaxTokenAmount);
         if (state.buyInputMode === "token") {
-          let tokenAmount = ethers.parseEther(String(amount));
+          const parsedTokenInput = parsePositiveEtherInput(buyTokenAmountText);
+          if (!parsedTokenInput) {
+            return;
+          }
+          let tokenAmount = parsedTokenInput.wei;
           if (tokenAmount > maxTokenAmount) {
             tokenAmount = maxTokenAmount;
             $("#buyTokenAmount").value = Number(ethers.formatEther(tokenAmount)).toFixed(6);
@@ -2246,7 +2278,11 @@ async function estimateSwapReceive() {
           $("#swapReceive").textContent = `预计支付: ${Number(ethers.formatEther(cost)).toFixed(6)} BNB`;
           return;
         }
-        const bnbAmount = ethers.parseEther(String(amount));
+        const parsedBnbInput = parsePositiveEtherInput(swapAmountText);
+        if (!parsedBnbInput) {
+          return;
+        }
+        const bnbAmount = parsedBnbInput.wei;
         const estimated = await estimateTokenAmountForBnb(launchpad, BigInt(tradeProject.projectId), bnbAmount, maxTokenAmount);
         if (estimated > 0n) {
           $("#buyTokenAmount").value = Number(ethers.formatEther(estimated)).toFixed(6);
@@ -2254,7 +2290,11 @@ async function estimateSwapReceive() {
           return;
         }
       } else {
-        const tokenAmount = ethers.parseEther(String(amount));
+        const parsedSellInput = parsePositiveEtherInput(swapAmountText);
+        if (!parsedSellInput) {
+          return;
+        }
+        const tokenAmount = parsedSellInput.wei;
         const estimatedBnb = await launchpad.quoteSell(BigInt(tradeProject.projectId), tokenAmount);
         $("#swapReceive").textContent = `您将收到: ${Number(ethers.formatEther(estimatedBnb)).toFixed(6)} BNB`;
         return;
@@ -2510,10 +2550,11 @@ async function handleSwapSubmit() {
   const button = $("#swapSubmit");
   try {
     requireTradableProject(project);
-    const rawAmount = state.swapSide === "buy" && state.buyInputMode === "token"
-      ? Number($("#buyTokenAmount").value || 0)
-      : Number($("#swapAmount").value || 0);
-    if (!rawAmount || rawAmount <= 0) {
+    const rawAmountText = state.swapSide === "buy" && state.buyInputMode === "token"
+      ? normalizeDecimalInput($("#buyTokenAmount").value)
+      : normalizeDecimalInput($("#swapAmount").value);
+    const parsedAmount = parsePositiveEtherInput(rawAmountText);
+    if (!parsedAmount) {
       throw new Error("请输入买入或卖出数量。");
     }
 
@@ -2528,12 +2569,12 @@ async function handleSwapSubmit() {
       const capMaxTokenAmount = ethers.parseEther(String(isWalletCapEnabled(tradeProject) ? tradeProject.cap : INTERNAL_SALE_SUPPLY));
       const maxTokenAmount = await getBuySearchUpperBound(tradeProject, signer, capMaxTokenAmount);
       const buyProjectId = BigInt(tradeProject.projectId);
-      const bnbInputAmount = state.buyInputMode === "bnb" ? ethers.parseEther(String(rawAmount)) : 0n;
+      const bnbInputAmount = state.buyInputMode === "bnb" ? parsedAmount.wei : 0n;
       let tokenAmount;
       if (state.buyInputMode === "token") {
-        tokenAmount = ethers.parseEther(String(rawAmount));
+        tokenAmount = parsedAmount.wei;
       } else {
-        const bnbAmount = ethers.parseEther(String(rawAmount));
+        const bnbAmount = parsedAmount.wei;
         tokenAmount = await estimateTokenAmountForBnb(launchpad, buyProjectId, bnbAmount, maxTokenAmount);
         if (tokenAmount <= 0n && maxTokenAmount > 0n) {
           tokenAmount = maxTokenAmount;
@@ -2586,7 +2627,7 @@ async function handleSwapSubmit() {
       return;
     }
 
-    const tokenAmount = ethers.parseEther(String(rawAmount));
+    const tokenAmount = parsedAmount.wei;
     if (isLaunchReadyProject(tradeProject)) {
       throw new Error("项目已满池，内盘卖出已关闭。请等待发射到 Pancake Swap 后在外盘卖出。");
     }
