@@ -4,6 +4,8 @@ pragma solidity ^0.8.24;
 interface IPancakeV2Router {
     function WETH() external pure returns (address);
 
+    function factory() external view returns (address);
+
     function addLiquidityETH(
         address token,
         uint256 amountTokenDesired,
@@ -12,10 +14,18 @@ interface IPancakeV2Router {
         address to,
         uint256 deadline
     ) external payable returns (uint256 amountToken, uint256 amountETH, uint256 amountLiquidity);
+
+    function swapExactTokensForETHSupportingFeeOnTransferTokens(
+        uint256 amountIn,
+        uint256 amountOutMin,
+        address[] calldata path,
+        address to,
+        uint256 deadline
+    ) external;
 }
 
-interface ILaunchpadHolderTracker {
-    function afterTokenTransfer(address from, address to) external;
+interface IPancakeV2Factory {
+    function getPair(address tokenA, address tokenB) external view returns (address pair);
 }
 
 /**
@@ -24,27 +34,65 @@ interface ILaunchpadHolderTracker {
  * The launchpad mints the fixed 10,000 token supply to itself on creation.
  */
 contract LaunchpadToken {
+    address public constant BURN_ADDRESS = 0x000000000000000000000000000000000000dEaD;
+    uint16 private constant BPS_DENOMINATOR = 10_000;
+    uint256 private constant MIN_DIVIDEND_HOLDING = 1 ether;
+    uint256 private constant DIVIDEND_MAGNITUDE = 2 ** 128;
     string public name;
     string public symbol;
     uint8 public constant decimals = 18;
     uint256 public totalSupply;
     address public immutable launchpad;
     address public owner;
+    address public externalLpPair;
+    address public externalLpReceiver;
+    uint16 public externalLpTaxBps;
+    uint256 public externalLpTokenThreshold;
+    bool public externalLpEnabled;
+    bool private swapping;
+    IPancakeV2Router private externalLpRouter;
+    uint256 public magnifiedDividendPerShare;
+    uint256 public totalDividendsDistributed;
+    uint256 public pendingDividendReserve;
+    uint256 public eligibleDividendSupply;
+    uint256 public lastProcessedDividendIndex;
 
     mapping(address => uint256) private _balances;
     mapping(address => mapping(address => uint256)) private _allowances;
+    mapping(address => uint256) private _trackedDividendBalances;
+    mapping(address => uint256) private _withdrawnDividends;
+    mapping(address => int256) private _magnifiedDividendCorrections;
+    address[] private _dividendHolders;
+    mapping(address => uint256) private _dividendHolderIndexPlusOne;
 
     event Transfer(address indexed from, address indexed to, uint256 amount);
     event Approval(address indexed owner, address indexed spender, uint256 amount);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+    event ExternalLpConfigured(
+        address indexed router,
+        address indexed pair,
+        address indexed receiver,
+        uint16 taxBps,
+        uint256 tokenThreshold
+    );
+    event ExternalAutoLiquidityAdded(
+        uint256 swapTokenAmount,
+        uint256 liquidityTokenAmount,
+        uint256 bnbAmount,
+        uint256 liquidityAmount
+    );
+    event HolderDividendsDeposited(uint256 amount, uint256 distributedAmount, uint256 reserveAmount);
+    event HolderDividendClaimed(address indexed account, uint256 amount, bool automatic);
+
+    receive() external payable {}
 
     modifier onlyLaunchpad() {
-        require(msg.sender == launchpad, "TOKEN: only launchpad");
+        require(msg.sender == launchpad, "T:LP");
         _;
     }
 
     constructor(string memory tokenName, string memory tokenSymbol, uint256 supply, address launchpadAddress) {
-        require(launchpadAddress != address(0), "TOKEN: zero launchpad");
+        require(launchpadAddress != address(0), "T:ZLP");
         name = tokenName;
         symbol = tokenSymbol;
         totalSupply = supply;
@@ -64,8 +112,7 @@ contract LaunchpadToken {
     }
 
     function approve(address spender, uint256 amount) external returns (bool) {
-        _allowances[msg.sender][spender] = amount;
-        emit Approval(msg.sender, spender, amount);
+        _approve(msg.sender, spender, amount);
         return true;
     }
 
@@ -76,7 +123,7 @@ contract LaunchpadToken {
 
     function transferFrom(address from, address to, uint256 amount) external returns (bool) {
         uint256 allowed = _allowances[from][msg.sender];
-        require(allowed >= amount, "TOKEN: allowance");
+        require(allowed >= amount, "T:ALL");
         if (allowed != type(uint256).max) {
             _allowances[from][msg.sender] = allowed - amount;
             emit Approval(from, msg.sender, _allowances[from][msg.sender]);
@@ -91,13 +138,7 @@ contract LaunchpadToken {
     }
 
     function launchpadBurn(uint256 amount) external onlyLaunchpad returns (bool) {
-        uint256 balance = _balances[launchpad];
-        require(balance >= amount, "TOKEN: burn balance");
-        unchecked {
-            _balances[launchpad] = balance - amount;
-            totalSupply -= amount;
-        }
-        emit Transfer(launchpad, address(0), amount);
+        _transfer(launchpad, BURN_ADDRESS, amount);
         return true;
     }
 
@@ -108,16 +149,276 @@ contract LaunchpadToken {
         return true;
     }
 
+    function launchpadConfigureExternalLp(
+        address router,
+        address pair,
+        address receiver,
+        uint16 taxBps,
+        uint256 tokenThreshold
+    ) external onlyLaunchpad returns (bool) {
+        require(router != address(0), "T:ZR");
+        require(pair != address(0), "T:ZP");
+        require(receiver != address(0), "T:ZW");
+        require(taxBps <= BPS_DENOMINATOR, "T:TB");
+        require(tokenThreshold > 0, "T:ZT");
+
+        externalLpRouter = IPancakeV2Router(router);
+        externalLpPair = pair;
+        externalLpReceiver = receiver;
+        externalLpTaxBps = taxBps;
+        externalLpTokenThreshold = tokenThreshold;
+        externalLpEnabled = taxBps > 0;
+        _syncDividendAccount(pair);
+
+        emit ExternalLpConfigured(router, pair, receiver, taxBps, tokenThreshold);
+        return true;
+    }
+
+    function launchpadDepositHolderDividends() external payable onlyLaunchpad returns (bool) {
+        uint256 amount = msg.value;
+        if (amount == 0) {
+            return true;
+        }
+
+        uint256 trackedSupply = eligibleDividendSupply;
+        if (trackedSupply == 0) {
+            pendingDividendReserve += amount;
+            emit HolderDividendsDeposited(amount, 0, amount);
+            return true;
+        }
+
+        uint256 reserveAmount = pendingDividendReserve;
+        if (reserveAmount > 0) {
+            amount += reserveAmount;
+            pendingDividendReserve = 0;
+        }
+
+        uint256 perShareIncrease = (amount * DIVIDEND_MAGNITUDE) / trackedSupply;
+        if (perShareIncrease == 0) {
+            pendingDividendReserve += amount;
+            emit HolderDividendsDeposited(amount, 0, amount);
+            return true;
+        }
+
+        uint256 distributedAmount = (perShareIncrease * trackedSupply) / DIVIDEND_MAGNITUDE;
+        uint256 dust = amount - distributedAmount;
+        magnifiedDividendPerShare += perShareIncrease;
+        totalDividendsDistributed += distributedAmount;
+        pendingDividendReserve += dust;
+
+        _processDividendClaims(6);
+        emit HolderDividendsDeposited(amount, distributedAmount, dust);
+        return true;
+    }
+
+    function withdrawableDividendOf(address account) external view returns (uint256) {
+        uint256 accumulative = _accumulativeDividendOf(account);
+        uint256 withdrawn = _withdrawnDividends[account];
+        return accumulative > withdrawn ? accumulative - withdrawn : 0;
+    }
+
+    function claimDividend() external returns (uint256) {
+        return _claimDividend(payable(msg.sender), false);
+    }
+
     function _transfer(address from, address to, uint256 amount) private {
-        require(to != address(0), "TOKEN: zero to");
+        require(to != address(0), "T:TO");
         uint256 balance = _balances[from];
-        require(balance >= amount, "TOKEN: balance");
+        require(balance >= amount, "T:BAL");
+
+        uint256 feeAmount = _takeExternalLpFee(from, to, amount);
+        uint256 receivedAmount = amount - feeAmount;
+
         unchecked {
             _balances[from] = balance - amount;
-            _balances[to] += amount;
+            _balances[to] += receivedAmount;
         }
-        emit Transfer(from, to, amount);
-        ILaunchpadHolderTracker(launchpad).afterTokenTransfer(from, to);
+        if (feeAmount > 0) {
+            _balances[address(this)] += feeAmount;
+            emit Transfer(from, address(this), feeAmount);
+        }
+        emit Transfer(from, to, receivedAmount);
+        _syncDividendAccount(from);
+        _syncDividendAccount(to);
+        _processDividendClaims(2);
+        _maybeProcessExternalLp(to);
+    }
+
+    function _approve(address tokenOwner, address spender, uint256 amount) private {
+        _allowances[tokenOwner][spender] = amount;
+        emit Approval(tokenOwner, spender, amount);
+    }
+
+    function _takeExternalLpFee(address from, address to, uint256 amount) private view returns (uint256) {
+        if (!externalLpEnabled || swapping || externalLpTaxBps == 0) {
+            return 0;
+        }
+        if (from == address(this) || to == address(this)) {
+            return 0;
+        }
+        if (to != externalLpPair) {
+            return 0;
+        }
+        return (amount * externalLpTaxBps) / BPS_DENOMINATOR;
+    }
+
+    function _maybeProcessExternalLp(address to) private {
+        if (!externalLpEnabled || swapping || to != externalLpPair) {
+            return;
+        }
+        uint256 threshold = externalLpTokenThreshold;
+        uint256 contractTokenBalance = _balances[address(this)];
+        if (threshold == 0 || contractTokenBalance < threshold) {
+            return;
+        }
+
+        uint256 liquidityTokens = threshold;
+        uint256 swapAmount = liquidityTokens / 2;
+        uint256 liquidityTokenAmount = liquidityTokens - swapAmount;
+        if (swapAmount == 0 || liquidityTokenAmount == 0) {
+            return;
+        }
+
+        swapping = true;
+
+        _approve(address(this), address(externalLpRouter), swapAmount);
+        address[] memory path = new address[](2);
+        path[0] = address(this);
+        path[1] = externalLpRouter.WETH();
+        uint256 bnbBefore = address(this).balance;
+        externalLpRouter.swapExactTokensForETHSupportingFeeOnTransferTokens(
+            swapAmount,
+            0,
+            path,
+            address(this),
+            block.timestamp + 900
+        );
+        uint256 bnbReceived = address(this).balance - bnbBefore;
+
+        uint256 liquidityAmount = 0;
+        if (bnbReceived > 0) {
+            _approve(address(this), address(externalLpRouter), liquidityTokenAmount);
+            (, , liquidityAmount) = externalLpRouter.addLiquidityETH{value: bnbReceived}(
+                address(this),
+                liquidityTokenAmount,
+                0,
+                0,
+                externalLpReceiver,
+                block.timestamp + 900
+            );
+        }
+
+        swapping = false;
+        emit ExternalAutoLiquidityAdded(swapAmount, liquidityTokenAmount, bnbReceived, liquidityAmount);
+    }
+
+    function _syncDividendAccount(address account) private {
+        if (account == address(0) || account == address(this) || account == BURN_ADDRESS || account == launchpad || account == externalLpPair) {
+            _setTrackedDividendBalance(account, 0);
+            _removeDividendHolder(account);
+            return;
+        }
+
+        uint256 balance = _balances[account];
+        bool isEligible = balance >= MIN_DIVIDEND_HOLDING;
+        bool isTracked = _dividendHolderIndexPlusOne[account] != 0;
+        if (isEligible && !isTracked) {
+            _dividendHolders.push(account);
+            _dividendHolderIndexPlusOne[account] = _dividendHolders.length;
+        }
+        if (!isEligible && isTracked) {
+            _removeDividendHolder(account);
+        }
+        _setTrackedDividendBalance(account, isEligible ? balance : 0);
+    }
+
+    function _setTrackedDividendBalance(address account, uint256 newBalance) private {
+        uint256 currentBalance = _trackedDividendBalances[account];
+        if (newBalance == currentBalance) {
+            return;
+        }
+
+        if (newBalance > currentBalance) {
+            uint256 added = newBalance - currentBalance;
+            _trackedDividendBalances[account] = newBalance;
+            eligibleDividendSupply += added;
+            _magnifiedDividendCorrections[account] -= _toInt256(magnifiedDividendPerShare * added);
+        } else {
+            uint256 removed = currentBalance - newBalance;
+            _trackedDividendBalances[account] = newBalance;
+            eligibleDividendSupply -= removed;
+            _magnifiedDividendCorrections[account] += _toInt256(magnifiedDividendPerShare * removed);
+        }
+    }
+
+    function _accumulativeDividendOf(address account) private view returns (uint256) {
+        uint256 trackedBalance = _trackedDividendBalances[account];
+        if (trackedBalance == 0) {
+            return 0;
+        }
+        int256 corrected = _toInt256(magnifiedDividendPerShare * trackedBalance) + _magnifiedDividendCorrections[account];
+        if (corrected <= 0) {
+            return 0;
+        }
+        return uint256(corrected) / DIVIDEND_MAGNITUDE;
+    }
+
+    function _claimDividend(address payable account, bool automatic) private returns (uint256) {
+        uint256 accumulative = _accumulativeDividendOf(account);
+        uint256 withdrawn = _withdrawnDividends[account];
+        if (accumulative <= withdrawn) {
+            return 0;
+        }
+
+        uint256 amount = accumulative - withdrawn;
+        _withdrawnDividends[account] = accumulative;
+        (bool ok, ) = account.call{value: amount}("");
+        if (!ok) {
+            _withdrawnDividends[account] = withdrawn;
+            return 0;
+        }
+        emit HolderDividendClaimed(account, amount, automatic);
+        return amount;
+    }
+
+    function _processDividendClaims(uint256 maxAccounts) private {
+        uint256 holderCount = _dividendHolders.length;
+        if (holderCount == 0 || maxAccounts == 0) {
+            return;
+        }
+
+        uint256 index = lastProcessedDividendIndex;
+        uint256 count = maxAccounts > holderCount ? holderCount : maxAccounts;
+        for (uint256 i = 0; i < count; ) {
+            index = (index + 1) % holderCount;
+            _claimDividend(payable(_dividendHolders[index]), true);
+            unchecked {
+                i += 1;
+            }
+        }
+        lastProcessedDividendIndex = index;
+    }
+
+    function _removeDividendHolder(address account) private {
+        uint256 indexPlusOne = _dividendHolderIndexPlusOne[account];
+        if (indexPlusOne == 0) {
+            return;
+        }
+        address[] storage holders = _dividendHolders;
+        uint256 index = indexPlusOne - 1;
+        uint256 lastIndex = holders.length - 1;
+        if (index != lastIndex) {
+            address lastHolder = holders[lastIndex];
+            holders[index] = lastHolder;
+            _dividendHolderIndexPlusOne[lastHolder] = index + 1;
+        }
+        holders.pop();
+        delete _dividendHolderIndexPlusOne[account];
+    }
+
+    function _toInt256(uint256 value) private pure returns (int256) {
+        require(value <= uint256(type(int256).max), "T:INT");
+        return int256(value);
     }
 }
 
@@ -130,7 +431,7 @@ contract LaunchpadToken {
  * - Internal market buy/sell charges 1% platform BNB tax.
  * - After launch, platform tax is disabled and LP tokens are sent to a configurable receiver.
  * - Project mechanism tax pays marketing in BNB, auto-pays holder dividends, and returns LP tax to the pool.
- * - Burn allocation reduces token supply instead of sending project tokens to wallets.
+ * - Burn allocation sends project tokens to the dead wallet while keeping total supply fixed.
  */
 contract FourBscLaunchpad {
     uint256 public constant TOKEN_SUPPLY = 10_000 ether;
@@ -149,6 +450,8 @@ contract FourBscLaunchpad {
     uint16 public constant MAX_PROJECT_TAX_BPS = 1_000;
     uint256 public constant MIN_DIVIDEND_HOLDING = 1 ether;
     uint256 public constant CREATE_PROTECTION_FEE = 0.01 ether;
+    uint256 public constant EXTERNAL_LP_TOKEN_THRESHOLD = 5 ether;
+    uint256 private constant DIVIDEND_MAGNITUDE = 2 ** 128;
     address public constant BURN_ADDRESS = 0x000000000000000000000000000000000000dEaD;
 
     struct TaxAllocation {
@@ -180,6 +483,7 @@ contract FourBscLaunchpad {
         uint256 walletCap;
         uint256 launchThreshold;
         uint256 bnbRaised;
+        uint256 lpBnbBuffer;
         uint256 tokensSold;
         uint256 tokensBurned;
         bool taxEnabled;
@@ -198,8 +502,6 @@ contract FourBscLaunchpad {
     mapping(uint256 => Project) private projects;
     mapping(address => uint256) private tokenProjectIdPlusOne;
     mapping(uint256 => mapping(address => uint256)) public walletPurchased;
-    mapping(uint256 => address[]) private dividendHolders;
-    mapping(uint256 => mapping(address => uint256)) private dividendHolderIndexPlusOne;
 
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     event PlatformFeeWalletUpdated(address indexed previousWallet, address indexed newWallet);
@@ -220,13 +522,14 @@ contract FourBscLaunchpad {
         uint256 dividendAmount,
         uint256 lpAmount
     );
-    event ProjectHolderDividendsPaid(
+    event ProjectExternalLpConfigured(
         uint256 indexed projectId,
-        uint256 totalAmount,
-        uint256 paidAmount,
-        uint256 lpFallbackAmount,
-        uint256 holderCount
+        address indexed token,
+        address indexed pair,
+        uint16 taxBps,
+        uint256 tokenThreshold
     );
+    event ProjectHolderDividendsPaid(uint256 indexed projectId, uint256 totalAmount);
     event ProjectTokensBurned(uint256 indexed projectId, uint256 tokenAmount);
     event ProjectLaunched(uint256 indexed projectId, address indexed token, uint256 tokenAmount, uint256 bnbAmount);
     event ProjectTokenOwnershipRenounced(uint256 indexed projectId, address indexed token);
@@ -249,25 +552,25 @@ contract FourBscLaunchpad {
     event CreateProtectionFeePaid(uint256 indexed projectId, address indexed creator, uint256 amount);
 
     modifier onlyOwner() {
-        require(msg.sender == owner, "LAUNCHPAD: only owner");
+        require(msg.sender == owner, "L:OWN");
         _;
     }
 
     modifier projectExists(uint256 projectId) {
-        require(projectId < projectCount, "LAUNCHPAD: bad project");
+        require(projectId < projectCount, "L:PID");
         _;
     }
 
     modifier nonReentrant() {
-        require(!locked, "LAUNCHPAD: reentrant");
+        require(!locked, "L:LOCK");
         locked = true;
         _;
         locked = false;
     }
 
     constructor(address router, address initialPlatformFeeWallet) {
-        require(router != address(0), "LAUNCHPAD: zero router");
-        require(initialPlatformFeeWallet != address(0), "LAUNCHPAD: zero platform wallet");
+        require(router != address(0), "L:ZR");
+        require(initialPlatformFeeWallet != address(0), "L:ZW");
         pancakeRouter = IPancakeV2Router(router);
         owner = msg.sender;
         platformFeeWallet = initialPlatformFeeWallet;
@@ -279,30 +582,6 @@ contract FourBscLaunchpad {
     }
 
     receive() external payable {}
-
-    function createProject(
-        ProjectConfig calldata config,
-        ProjectTaxConfig calldata taxConfig
-    ) external payable nonReentrant returns (uint256 projectId, address token) {
-        (projectId, token) = _createProject(config, taxConfig, bytes32(0), false);
-        uint256 remainingBnb = _chargeCreateProtectionFee(projectId, msg.value);
-        if (remainingBnb > 0) {
-            _sendValue(msg.sender, remainingBnb);
-        }
-    }
-
-    function createProjectVanity(
-        ProjectConfig calldata config,
-        ProjectTaxConfig calldata taxConfig,
-        bytes32 userSalt
-    ) external payable nonReentrant returns (uint256 projectId, address token) {
-        (projectId, token) = _createProject(config, taxConfig, _scopedSalt(msg.sender, userSalt), true);
-        emit ProjectVanitySalt(projectId, userSalt, token);
-        uint256 remainingBnb = _chargeCreateProtectionFee(projectId, msg.value);
-        if (remainingBnb > 0) {
-            _sendValue(msg.sender, remainingBnb);
-        }
-    }
 
     function createProjectVanityAndBuy(
         ProjectConfig calldata config,
@@ -351,20 +630,20 @@ contract FourBscLaunchpad {
         uint256 walletCap = config.walletCapTokens * 1 ether;
         uint256 launchThreshold = config.launchThresholdBnb;
         if (config.walletCapEnabled) {
-            require(walletCap >= MIN_WALLET_CAP && walletCap <= MAX_WALLET_CAP, "LAUNCHPAD: cap 1-100");
+            require(walletCap >= MIN_WALLET_CAP && walletCap <= MAX_WALLET_CAP, "L:CAP");
         } else {
-            require(config.walletCapTokens == 0, "LAUNCHPAD: disabled cap");
+            require(config.walletCapTokens == 0, "L:DCAP");
             walletCap = 0;
         }
-        require(launchThreshold >= MIN_LAUNCH_THRESHOLD && launchThreshold <= MAX_LAUNCH_THRESHOLD, "LAUNCHPAD: threshold 0.05-8");
+        require(launchThreshold >= MIN_LAUNCH_THRESHOLD && launchThreshold <= MAX_LAUNCH_THRESHOLD, "L:THR");
         _validateTaxSettings(taxConfig.taxEnabled, taxConfig.projectTaxBps, taxConfig.allocation);
         if (taxConfig.taxEnabled && taxConfig.allocation.marketingBps > 0) {
-            require(config.marketingWallet != address(0), "LAUNCHPAD: zero marketing wallet");
+            require(config.marketingWallet != address(0), "L:MW");
         }
 
         if (requireVanity) {
             token = _predictTokenAddress(config.tokenName, config.tokenSymbol, salt);
-            require(_hasVanitySuffix(token), "LAUNCHPAD: token suffix");
+            require(_hasVanitySuffix(token), "L:SUF");
             token = address(new LaunchpadToken{salt: salt}(config.tokenName, config.tokenSymbol, TOKEN_SUPPLY, address(this)));
         } else {
             token = address(new LaunchpadToken(config.tokenName, config.tokenSymbol, TOKEN_SUPPLY, address(this)));
@@ -431,7 +710,7 @@ contract FourBscLaunchpad {
     }
 
     function _chargeCreateProtectionFee(uint256 projectId, uint256 bnbProvided) private returns (uint256 remainingBnb) {
-        require(bnbProvided >= CREATE_PROTECTION_FEE, "LAUNCHPAD: create fee");
+        require(bnbProvided >= CREATE_PROTECTION_FEE, "L:FEE");
         _sendValue(platformFeeWallet, CREATE_PROTECTION_FEE);
         emit CreateProtectionFeePaid(projectId, msg.sender, CREATE_PROTECTION_FEE);
         return bnbProvided - CREATE_PROTECTION_FEE;
@@ -448,17 +727,17 @@ contract FourBscLaunchpad {
         uint256 bnbProvided
     ) private projectExists(projectId) {
         Project storage project = projects[projectId];
-        require(!project.launched, "LAUNCHPAD: launched");
-        require(tokenAmount > 0, "LAUNCHPAD: zero amount");
+        require(!project.launched, "L:LIVE");
+        require(tokenAmount > 0, "L:AMT");
         uint256 burnAmount = _burnAmount(project, tokenAmount);
-        require(project.tokensSold + tokenAmount <= INTERNAL_SALE_SUPPLY, "LAUNCHPAD: sold out");
-        require(project.tokensSold + project.tokensBurned + tokenAmount + burnAmount <= TOKEN_SUPPLY, "LAUNCHPAD: sold out");
+        require(project.tokensSold + tokenAmount <= INTERNAL_SALE_SUPPLY, "L:SOLD");
+        require(project.tokensSold + project.tokensBurned + tokenAmount + burnAmount <= TOKEN_SUPPLY, "L:SOLD");
         if (project.walletCap > 0) {
-            require(walletPurchased[projectId][buyer] + tokenAmount <= project.walletCap, "LAUNCHPAD: wallet cap");
+            require(walletPurchased[projectId][buyer] + tokenAmount <= project.walletCap, "L:WCAP");
         }
 
         uint256 grossCost = quoteBuy(projectId, tokenAmount);
-        require(bnbProvided >= grossCost, "LAUNCHPAD: insufficient BNB");
+        require(bnbProvided >= grossCost, "L:BNB");
 
         uint256 platformTax = (grossCost * PLATFORM_TAX_BPS) / BPS_DENOMINATOR;
         uint256 projectBnbTax = _projectBnbTax(project, grossCost);
@@ -475,10 +754,10 @@ contract FourBscLaunchpad {
         }
 
         if (burnAmount > 0) {
-            LaunchpadToken(project.token).launchpadBurn(burnAmount);
+            LaunchpadToken(payable(project.token)).launchpadBurn(burnAmount);
             emit ProjectTokensBurned(projectId, burnAmount);
         }
-        LaunchpadToken(project.token).launchpadTransferTo(buyer, tokenAmount);
+        LaunchpadToken(payable(project.token)).launchpadTransferTo(buyer, tokenAmount);
         emit InternalBuy(projectId, buyer, tokenAmount, grossCost, platformTax);
 
         if (_isLaunchReady(project)) {
@@ -488,14 +767,14 @@ contract FourBscLaunchpad {
 
     function sell(uint256 projectId, uint256 tokenAmount) external projectExists(projectId) nonReentrant {
         Project storage project = projects[projectId];
-        require(!project.launched, "LAUNCHPAD: launched");
-        require(!_isLaunchReady(project), "LAUNCHPAD: launch ready");
-        require(tokenAmount > 0, "LAUNCHPAD: zero amount");
+        require(!project.launched, "L:LIVE");
+        require(!_isLaunchReady(project), "L:RDY");
+        require(tokenAmount > 0, "L:AMT");
 
         uint256 grossReturn = quoteSell(projectId, tokenAmount);
-        require(project.bnbRaised >= grossReturn, "LAUNCHPAD: pool balance");
+        require(project.bnbRaised >= grossReturn, "L:POOL");
 
-        LaunchpadToken(project.token).transferFrom(msg.sender, address(this), tokenAmount);
+        LaunchpadToken(payable(project.token)).transferFrom(msg.sender, address(this), tokenAmount);
 
         uint256 platformTax = (grossReturn * PLATFORM_TAX_BPS) / BPS_DENOMINATOR;
         uint256 projectBnbTax = _projectBnbTax(project, grossReturn);
@@ -512,25 +791,15 @@ contract FourBscLaunchpad {
         emit InternalSell(projectId, msg.sender, tokenAmount, sellerReturn, platformTax);
     }
 
-    function launchToPancake(uint256 projectId) external projectExists(projectId) nonReentrant {
-        Project storage project = projects[projectId];
-        require(msg.sender == project.creator || msg.sender == owner, "LAUNCHPAD: only creator");
-        require(!project.launched, "LAUNCHPAD: already launched");
-        require(_isLaunchReady(project), "LAUNCHPAD: threshold not met");
-
-        bool launched = _tryLaunchToPancake(projectId, project, true);
-        require(launched, "LAUNCHPAD: pancake launch failed");
-    }
-
     function launchToPancakeByToken(address token) external nonReentrant {
         uint256 projectId = _projectIdByToken(token);
         Project storage project = projects[projectId];
-        require(msg.sender == project.creator || msg.sender == owner, "LAUNCHPAD: only creator");
-        require(!project.launched, "LAUNCHPAD: already launched");
-        require(_isLaunchReady(project), "LAUNCHPAD: threshold not met");
+        require(msg.sender == project.creator || msg.sender == owner, "L:CRT");
+        require(!project.launched, "L:LIVE");
+        require(_isLaunchReady(project), "L:THM");
 
         bool launched = _tryLaunchToPancake(projectId, project, true);
-        require(launched, "LAUNCHPAD: pancake launch failed");
+        require(launched, "L:FAIL");
     }
 
     function _tryLaunchToPancake(
@@ -538,11 +807,11 @@ contract FourBscLaunchpad {
         Project storage project,
         bool revertOnFailure
     ) private returns (bool) {
-        uint256 tokenAmount = LaunchpadToken(project.token).balanceOf(address(this));
-        uint256 bnbAmount = project.bnbRaised;
-        require(tokenAmount > 0 && bnbAmount > 0, "LAUNCHPAD: empty liquidity");
+        uint256 tokenAmount = LaunchpadToken(payable(project.token)).balanceOf(address(this));
+        uint256 bnbAmount = project.bnbRaised + project.lpBnbBuffer;
+        require(tokenAmount > 0 && bnbAmount > 0, "L:EMP");
 
-        LaunchpadToken(project.token).approve(address(pancakeRouter), tokenAmount);
+        LaunchpadToken(payable(project.token)).approve(address(pancakeRouter), tokenAmount);
         try pancakeRouter.addLiquidityETH{value: bnbAmount}(
             project.token,
             tokenAmount,
@@ -553,7 +822,9 @@ contract FourBscLaunchpad {
         ) {
             project.launched = true;
             project.bnbRaised = 0;
-            LaunchpadToken(project.token).launchpadRenounceOwnership();
+            project.lpBnbBuffer = 0;
+            _configureProjectExternalLp(projectId, project);
+            LaunchpadToken(payable(project.token)).launchpadRenounceOwnership();
 
             emit ProjectLaunched(projectId, project.token, tokenAmount, bnbAmount);
             emit ProjectTokenOwnershipRenounced(projectId, project.token);
@@ -567,91 +838,71 @@ contract FourBscLaunchpad {
         }
     }
 
-    function confirmExternalLaunchAndRenounceByToken(address token) external onlyOwner nonReentrant {
-        uint256 projectId = _projectIdByToken(token);
-        _confirmExternalLaunchAndRenounce(projectId);
-    }
-
-    function confirmExternalLaunchAndRenounce(uint256 projectId) external onlyOwner projectExists(projectId) nonReentrant {
-        _confirmExternalLaunchAndRenounce(projectId);
-    }
-
-    function rescueLaunchLiquidity(
-        uint256 projectId,
-        address receiver
-    ) external onlyOwner projectExists(projectId) nonReentrant {
-        _rescueLaunchLiquidity(projectId, receiver);
-    }
-
-    function rescueLaunchLiquidityByToken(
-        address token,
-        address receiver
-    ) external onlyOwner nonReentrant {
-        uint256 projectId = _projectIdByToken(token);
-        _rescueLaunchLiquidity(projectId, receiver);
-    }
-
     function rescueLaunchLiquidityToPlatformByToken(address token) external onlyOwner nonReentrant {
         uint256 projectId = _projectIdByToken(token);
         _rescueLaunchLiquidity(projectId, platformFeeWallet);
     }
 
     function _rescueLaunchLiquidity(uint256 projectId, address receiver) private {
-        require(receiver != address(0), "LAUNCHPAD: zero receiver");
+        require(receiver != address(0), "L:RCV");
         Project storage project = projects[projectId];
-        require(!project.launched, "LAUNCHPAD: already launched");
-        require(_isLaunchReady(project), "LAUNCHPAD: threshold not met");
+        require(!project.launched, "L:LIVE");
+        require(_isLaunchReady(project), "L:THM");
 
-        uint256 tokenAmount = LaunchpadToken(project.token).balanceOf(address(this));
-        uint256 bnbAmount = project.bnbRaised;
-        require(tokenAmount > 0 && bnbAmount > 0, "LAUNCHPAD: empty liquidity");
+        uint256 tokenAmount = LaunchpadToken(payable(project.token)).balanceOf(address(this));
+        uint256 bnbAmount = project.bnbRaised + project.lpBnbBuffer;
+        require(tokenAmount > 0 && bnbAmount > 0, "L:EMP");
 
         project.launched = true;
         project.bnbRaised = 0;
+        project.lpBnbBuffer = 0;
 
-        LaunchpadToken(project.token).launchpadTransferTo(receiver, tokenAmount);
+        LaunchpadToken(payable(project.token)).launchpadTransferTo(receiver, tokenAmount);
         _sendValue(receiver, bnbAmount);
 
         emit ProjectLaunchRescued(projectId, project.token, receiver, tokenAmount, bnbAmount);
         emit ProjectLaunched(projectId, project.token, tokenAmount, bnbAmount);
     }
 
+    function _configureProjectExternalLp(uint256 projectId, Project storage project) private {
+        uint16 externalLpTaxBps = _externalLpTaxBps(project);
+        if (externalLpTaxBps == 0) {
+            return;
+        }
+        address pair = IPancakeV2Factory(pancakeRouter.factory()).getPair(project.token, pancakeRouter.WETH());
+        require(pair != address(0), "L:PAIR");
+        LaunchpadToken(payable(project.token)).launchpadConfigureExternalLp(
+            address(pancakeRouter),
+            pair,
+            launchLpReceiver,
+            externalLpTaxBps,
+            EXTERNAL_LP_TOKEN_THRESHOLD
+        );
+        emit ProjectExternalLpConfigured(projectId, project.token, pair, externalLpTaxBps, EXTERNAL_LP_TOKEN_THRESHOLD);
+    }
+
     function _confirmExternalLaunchAndRenounce(uint256 projectId) private {
         Project storage project = projects[projectId];
-        require(project.launched, "LAUNCHPAD: not launched");
-        LaunchpadToken(project.token).launchpadRenounceOwnership();
+        require(project.launched, "L:NL");
+        LaunchpadToken(payable(project.token)).launchpadRenounceOwnership();
         emit ProjectTokenOwnershipRenounced(projectId, project.token);
     }
 
     function _projectIdByToken(address token) private view returns (uint256) {
         uint256 projectIdPlusOne = tokenProjectIdPlusOne[token];
-        require(projectIdPlusOne > 0, "LAUNCHPAD: unknown token");
+        require(projectIdPlusOne > 0, "L:TKN");
         return projectIdPlusOne - 1;
     }
 
-    function setPancakeRouter(address newRouter) external onlyOwner {
-        require(newRouter != address(0), "LAUNCHPAD: zero router");
-        address previous = address(pancakeRouter);
-        pancakeRouter = IPancakeV2Router(newRouter);
-        emit PancakeRouterUpdated(previous, newRouter);
-    }
-
-    function setPlatformFeeWallet(address newWallet) external onlyOwner {
-        require(newWallet != address(0), "LAUNCHPAD: zero wallet");
-        address previous = platformFeeWallet;
-        platformFeeWallet = newWallet;
-        emit PlatformFeeWalletUpdated(previous, newWallet);
-    }
-
     function setLaunchLpReceiver(address newReceiver) external onlyOwner {
-        require(newReceiver != address(0), "LAUNCHPAD: zero lp receiver");
+        require(newReceiver != address(0), "L:ZLP");
         address previous = launchLpReceiver;
         launchLpReceiver = newReceiver;
         emit LaunchLpReceiverUpdated(previous, newReceiver);
     }
 
     function transferOwnership(address newOwner) external onlyOwner {
-        require(newOwner != address(0), "LAUNCHPAD: zero owner");
+        require(newOwner != address(0), "L:ZO");
         emit OwnershipTransferred(owner, newOwner);
         owner = newOwner;
     }
@@ -665,7 +916,7 @@ contract FourBscLaunchpad {
 
     function quoteSell(uint256 projectId, uint256 tokenAmount) public view projectExists(projectId) returns (uint256) {
         Project storage project = projects[projectId];
-        require(tokenAmount <= project.tokensSold, "LAUNCHPAD: sell amount");
+        require(tokenAmount <= project.tokensSold, "L:SELL");
         return _curvePoolAmount(project.launchThreshold, project.tokensSold - tokenAmount, tokenAmount);
     }
 
@@ -689,7 +940,7 @@ contract FourBscLaunchpad {
             return 0;
         }
         uint256 endSold = startSold + tokenAmount;
-        require(endSold <= INTERNAL_SALE_SUPPLY, "LAUNCHPAD: sold out");
+        require(endSold <= INTERNAL_SALE_SUPPLY, "L:SOLD");
 
         uint256 baseAmount =
             (tokenAmount * launchThreshold * CURVE_BASE_BPS) /
@@ -731,12 +982,19 @@ contract FourBscLaunchpad {
         );
     }
 
-    function afterTokenTransfer(address from, address to) external {
-        uint256 projectIdPlusOne = tokenProjectIdPlusOne[msg.sender];
-        require(projectIdPlusOne != 0, "LAUNCHPAD: unknown token");
-        uint256 projectId = projectIdPlusOne - 1;
-        _refreshDividendHolder(projectId, from);
-        _refreshDividendHolder(projectId, to);
+    function getProjectLiquidityState(uint256 projectId) external view projectExists(projectId) returns (
+        uint256 launchPoolBnb,
+        uint256 lpBnbBuffer,
+        uint16 externalLpTaxBps,
+        uint256 externalLpTokenThreshold
+    ) {
+        Project storage project = projects[projectId];
+        return (
+            project.bnbRaised,
+            project.lpBnbBuffer,
+            _externalLpTaxBps(project),
+            EXTERNAL_LP_TOKEN_THRESHOLD
+        );
     }
 
     function _validateTaxSettings(
@@ -749,12 +1007,12 @@ contract FourBscLaunchpad {
             + uint256(allocation.dividendBps)
             + uint256(allocation.lpTreasuryBps);
         if (!taxEnabled) {
-            require(projectTaxBps == 0, "LAUNCHPAD: disabled tax bps");
-            require(total == 0, "LAUNCHPAD: disabled allocation");
+            require(projectTaxBps == 0, "L:DTB");
+            require(total == 0, "L:DAL");
             return;
         }
-        require(projectTaxBps >= MIN_PROJECT_TAX_BPS && projectTaxBps <= MAX_PROJECT_TAX_BPS, "LAUNCHPAD: tax 1-10%");
-        require(total == BPS_DENOMINATOR, "LAUNCHPAD: allocation must be 100%");
+        require(projectTaxBps >= MIN_PROJECT_TAX_BPS && projectTaxBps <= MAX_PROJECT_TAX_BPS, "L:TAX");
+        require(total == BPS_DENOMINATOR, "L:ALC");
     }
 
     function _bnbProjectTaxBps(Project storage project) private view returns (uint256) {
@@ -803,88 +1061,26 @@ contract FourBscLaunchpad {
             / uint256(BPS_DENOMINATOR)
             / uint256(BPS_DENOMINATOR);
 
-        project.bnbRaised += lpAmount;
-        _sendValue(project.marketingWallet, marketingAmount);
-        _payHolderDividends(projectId, project, dividendAmount);
+        project.lpBnbBuffer += lpAmount;
+        if (marketingAmount > 0) {
+            _sendValue(project.marketingWallet, marketingAmount);
+        }
+        if (dividendAmount > 0) {
+            LaunchpadToken(payable(project.token)).launchpadDepositHolderDividends{value: dividendAmount}();
+            emit ProjectHolderDividendsPaid(projectId, dividendAmount);
+        }
         emit ProjectBnbTaxDistributed(projectId, marketingAmount, dividendAmount, lpAmount);
     }
 
-    function _payHolderDividends(uint256 projectId, Project storage project, uint256 amount) private {
-        if (amount == 0) {
-            return;
+    function _externalLpTaxBps(Project storage project) private view returns (uint16) {
+        if (!project.taxEnabled) {
+            return 0;
         }
-        address[] storage holders = dividendHolders[projectId];
-        uint256 holderCount = holders.length;
-        if (holderCount == 0) {
-            project.bnbRaised += amount;
-            emit ProjectHolderDividendsPaid(projectId, amount, 0, amount, 0);
-            return;
+        uint256 bps = (uint256(project.projectTaxBps) * uint256(project.taxAllocation.lpTreasuryBps)) / BPS_DENOMINATOR;
+        if (bps > type(uint16).max) {
+            return type(uint16).max;
         }
-
-        LaunchpadToken token = LaunchpadToken(project.token);
-        uint256 eligibleSupply = 0;
-        for (uint256 i = 0; i < holderCount; ) {
-            eligibleSupply += token.balanceOf(holders[i]);
-            unchecked {
-                i += 1;
-            }
-        }
-
-        if (eligibleSupply == 0) {
-            project.bnbRaised += amount;
-            emit ProjectHolderDividendsPaid(projectId, amount, 0, amount, holderCount);
-            return;
-        }
-
-        uint256 paidAmount = 0;
-        for (uint256 i = 0; i < holderCount; ) {
-            address holder = holders[i];
-            uint256 share = (amount * token.balanceOf(holder)) / eligibleSupply;
-            if (_trySendValue(holder, share)) {
-                paidAmount += share;
-            }
-            unchecked {
-                i += 1;
-            }
-        }
-
-        uint256 dust = amount - paidAmount;
-        project.bnbRaised += dust;
-        emit ProjectHolderDividendsPaid(projectId, amount, paidAmount, dust, holderCount);
-    }
-
-    function _refreshDividendHolder(uint256 projectId, address account) private {
-        if (account == address(0) || account == address(this) || account == BURN_ADDRESS) {
-            return;
-        }
-        Project storage project = projects[projectId];
-        bool isEligible = LaunchpadToken(project.token).balanceOf(account) >= MIN_DIVIDEND_HOLDING;
-        bool isTracked = dividendHolderIndexPlusOne[projectId][account] != 0;
-        if (isEligible && !isTracked) {
-            dividendHolders[projectId].push(account);
-            dividendHolderIndexPlusOne[projectId][account] = dividendHolders[projectId].length;
-            return;
-        }
-        if (!isEligible && isTracked) {
-            _removeDividendHolder(projectId, account);
-        }
-    }
-
-    function _removeDividendHolder(uint256 projectId, address account) private {
-        uint256 indexPlusOne = dividendHolderIndexPlusOne[projectId][account];
-        if (indexPlusOne == 0) {
-            return;
-        }
-        address[] storage holders = dividendHolders[projectId];
-        uint256 index = indexPlusOne - 1;
-        uint256 lastIndex = holders.length - 1;
-        if (index != lastIndex) {
-            address lastHolder = holders[lastIndex];
-            holders[index] = lastHolder;
-            dividendHolderIndexPlusOne[projectId][lastHolder] = index + 1;
-        }
-        holders.pop();
-        delete dividendHolderIndexPlusOne[projectId][account];
+        return uint16(bps);
     }
 
     function _sendValue(address to, uint256 amount) private {
@@ -892,7 +1088,7 @@ contract FourBscLaunchpad {
             return;
         }
         (bool ok, ) = payable(to).call{value: amount}("");
-        require(ok, "LAUNCHPAD: BNB transfer failed");
+        require(ok, "L:XFER");
     }
 
     function _trySendValue(address to, uint256 amount) private returns (bool) {

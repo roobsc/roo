@@ -366,6 +366,27 @@ const ERC20_ABI = [
     outputs: [{ name: "", type: "bool" }],
     stateMutability: "nonpayable",
     type: "function"
+  },
+  {
+    inputs: [{ name: "account", type: "address" }],
+    name: "withdrawableDividendOf",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "totalDividendsDistributed",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "claimDividend",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "nonpayable",
+    type: "function"
   }
 ];
 
@@ -433,6 +454,7 @@ const state = {
   chartInterval: "1m",
   swapSide: "buy",
   buyInputMode: "bnb",
+  claimingDividend: false,
   mevProtection: false,
   slippagePercent: 15,
   selectedTokenBalance: 0,
@@ -565,6 +587,158 @@ function renderProjectSocialLinks(project) {
       <span class="project-social-icon">${item.icon}</span>
     </a>
   `).join("");
+}
+
+function cacheProjectDividendInfo(project, dividendInfo) {
+  if (!project) {
+    return dividendInfo || null;
+  }
+  project.dividendInfo = dividendInfo || null;
+  const selected = state.selectedProject;
+  if (selected && isSameAddress(selected.contract || "", project.contract || "")) {
+    state.selectedProject = { ...selected, dividendInfo: project.dividendInfo };
+  }
+  const index = projects.findIndex((item) => isSameAddress(item.contract || "", project.contract || ""));
+  if (index >= 0) {
+    projects[index] = { ...projects[index], dividendInfo: project.dividendInfo };
+    if (state.selectedProject && isSameAddress(state.selectedProject.contract || "", projects[index].contract || "")) {
+      state.selectedProject = projects[index];
+    }
+  }
+  return project.dividendInfo;
+}
+
+async function loadProjectDividendInfo(project, signerOrProvider = null, walletAddress = "") {
+  if (!project || !window.ethers || !ethers.isAddress(project.contract || "")) {
+    return cacheProjectDividendInfo(project, null);
+  }
+  try {
+    const provider = signerOrProvider
+      || (window.ethereum
+        ? new ethers.BrowserProvider(window.ethereum)
+        : new ethers.JsonRpcProvider(config.rpcUrl || "https://bsc-dataseed.binance.org"));
+    const token = new ethers.Contract(project.contract, ERC20_ABI, provider);
+    const normalizedWallet = walletAddress && ethers.isAddress(walletAddress) ? walletAddress : "";
+    const calls = [token.totalDividendsDistributed()];
+    if (normalizedWallet) {
+      calls.push(token.withdrawableDividendOf(normalizedWallet));
+    }
+    const [totalDistributedRaw, withdrawableRaw] = await Promise.all(calls);
+    return cacheProjectDividendInfo(project, {
+      supported: true,
+      totalDistributedBnb: Number(ethers.formatEther(totalDistributedRaw || 0n)),
+      withdrawableBnb: normalizedWallet ? Number(ethers.formatEther(withdrawableRaw || 0n)) : null
+    });
+  } catch {
+    return cacheProjectDividendInfo(project, { supported: false });
+  }
+}
+
+async function refreshTradeDividendInfo(project = state.selectedProject) {
+  if (!project || !window.ethers || !ethers.isAddress(project.contract || "")) {
+    renderTradeMetaRow(project);
+    return null;
+  }
+  const dividendInfo = await loadProjectDividendInfo(project, null, state.wallet || "");
+  if (state.selectedProject && isSameAddress(state.selectedProject.contract || "", project.contract || "")) {
+    renderTradeMetaRow(state.selectedProject);
+  }
+  return dividendInfo;
+}
+
+function renderTradeMetaRow(project) {
+  const container = $("#tradeMetaRow");
+  if (!container) {
+    return;
+  }
+  const metadata = project && project.metadata ? project.metadata : {};
+  const items = [];
+  const links = [
+    {
+      label: "X",
+      href: ensureExternalUrl(metadata.x),
+      icon: `
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M4 4h4.6l4.1 5.7L17.7 4H20l-6.1 7.1L20 20h-4.6l-4.4-6.2L5.8 20H3.5l6.4-7.5z"></path>
+        </svg>
+      `
+    },
+    {
+      label: "TG",
+      href: ensureExternalUrl(metadata.telegram),
+      icon: `
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M20.7 4.3 3.8 10.8c-1.1.4-1 2 .1 2.3l4.3 1.3 1.7 5.2c.2.7 1.1.9 1.6.4l2.5-2.4 4.8 3.5c.8.6 2 .1 2.2-.9l2.7-14.1c.2-1.1-.9-2-1.9-1.6zM9.3 13.9l8-6.3-6 7.7-.2 2.6z"></path>
+        </svg>
+      `
+    },
+    {
+      label: t("website"),
+      href: ensureExternalUrl(metadata.website),
+      icon: `
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M12 3a9 9 0 1 0 0 18a9 9 0 0 0 0-18zm6.8 8h-3.1a14.8 14.8 0 0 0-1.4-5A7.1 7.1 0 0 1 18.8 11zM12 5.1c.9 1.1 1.8 3.1 2.2 5.9H9.8c.4-2.8 1.3-4.8 2.2-5.9zM9.7 6A14.8 14.8 0 0 0 8.3 11H5.2A7.1 7.1 0 0 1 9.7 6zm-4.5 7h3.1a14.8 14.8 0 0 0 1.4 5A7.1 7.1 0 0 1 5.2 13zM12 18.9c-.9-1.1-1.8-3.1-2.2-5.9h4.4c-.4 2.8-1.3 4.8-2.2 5.9zm2.3-.9a14.8 14.8 0 0 0 1.4-5h3.1A7.1 7.1 0 0 1 14.3 18z"></path>
+        </svg>
+      `
+    }
+  ].filter((item) => item.href);
+
+  links.forEach((item) => {
+    items.push(`
+      <a class="trade-meta-link icon-only" href="${escapeAttr(item.href)}" target="_blank" rel="noreferrer" aria-label="${escapeAttr(item.label)}" title="${escapeAttr(item.label)}">
+        <span class="trade-meta-icon">${item.icon}</span>
+      </a>
+    `);
+  });
+
+  if (Number(project && project.projectTaxBps || 0) > 0) {
+    items.push(`<span class="trade-meta-chip accent">${t("taxRate")} ${Number(project.projectTaxBps) / 100}%</span>`);
+  }
+
+  const dividendInfo = project && project.dividendInfo;
+  if (dividendInfo && dividendInfo.supported) {
+    items.push(`<span class="trade-meta-chip">${t("dividendClaimable")} ${formatBnb(Number(dividendInfo.withdrawableBnb || 0), 6)}</span>`);
+    items.push(`<span class="trade-meta-chip">${t("dividendTotal")} ${formatBnb(Number(dividendInfo.totalDistributedBnb || 0), 6)}</span>`);
+    items.push(`
+      <button
+        class="trade-meta-action${state.claimingDividend ? " loading" : ""}"
+        type="button"
+        data-claim-dividend
+        ${state.claimingDividend ? "disabled" : ""}
+      >${state.claimingDividend ? t("dividendClaiming") : t("dividendClaimAction")}</button>
+    `);
+  }
+
+  container.hidden = items.length === 0;
+  container.innerHTML = items.join("");
+}
+
+async function handleClaimDividend() {
+  const project = state.selectedProject;
+  if (!project || !window.ethers || !ethers.isAddress(project.contract || "")) {
+    return;
+  }
+  try {
+    state.claimingDividend = true;
+    renderTradeMetaRow(project);
+    $("#swapReceive").textContent = t("dividendClaimPending");
+    const { signer } = await getTradeSigner();
+    const token = new ethers.Contract(project.contract, ERC20_ABI, signer);
+    const tx = await token.claimDividend();
+    $("#swapReceive").textContent = t("dividendClaimSubmitted").replace("{hash}", tx.hash);
+    await tx.wait();
+    $("#swapReceive").textContent = t("dividendClaimSuccess");
+    await refreshTradeDividendInfo(project);
+  } catch (error) {
+    $("#swapReceive").textContent = error && error.message
+      ? error.message
+      : t("dividendClaimFailed");
+  } finally {
+    state.claimingDividend = false;
+    if (state.selectedProject) {
+      renderTradeMetaRow(state.selectedProject);
+    }
+  }
 }
 
 function getProjectAvatarMarkup(project) {
@@ -941,6 +1115,8 @@ async function buildProjectFromChain(projectId, basics, provider, launchpadContr
     creator: basics.creator,
     contract: basics.token,
     launchpadAddress,
+    projectTaxBps: Number(basics.projectTaxBps || 0),
+    taxEnabled: Boolean(basics.taxEnabled),
     change: 0,
     listed: launched,
     avatar: symbol.slice(0, 1).toUpperCase()
@@ -1494,7 +1670,7 @@ const translations = {
     taxFull: "分配已满 100%。",
     taxInvalid: "当前分配为 {total}%，需要刚好等于 100%。",
     taxMarketingRow: "营销钱包（营销、捐赠等，BNB）",
-    taxBurnRow: "销毁（减少供应量）",
+    taxBurnRow: "销毁（转入黑洞，总量不变）",
     taxRewardRow: "持币分红（>= 1 枚自动收 BNB）",
     taxLpRow: "回流 LP（BNB 自动进项目池）",
     summarySupply: "总供应量",
@@ -1531,7 +1707,7 @@ const translations = {
     treasuryInternalCopy: "项目在内盘阶段按单钱包 1-100 枚限购成交，达到设定底池后再发射到 Pancake Swap。",
     treasuryTaxKicker: "项目税机制",
     treasuryTaxTitle: "四路分配",
-    treasuryTaxCopy: "营销收 BNB；分红自动发给达到 1 枚的持币者；回流 LP 自动进入项目池；销毁用于减少供应量。",
+    treasuryTaxCopy: "营销收 BNB；分红自动发给达到 1 枚的持币者；回流 LP 自动进入项目池；销毁代币转入黑洞地址，但总量保持不变。",
     treasuryLaunchKicker: "外盘发射",
     treasuryLaunchTitle: "LP 测试托管",
     treasuryLaunchCopy: "测试阶段可用 0.05-8 BNB 的手动阈值创建 Pancake 流动池，LP token 先发送到平台钱包。",
@@ -1587,7 +1763,15 @@ const translations = {
     tradeInternalDescription: "该项目仍在 roo 内盘，达到发射阈值后可进入 Pancake Swap。",
     tradeUnsyncedWarning: "这个项目还没有同步到链上 projectId，暂时不能交易。",
     tradeVolumeTemplate: "{volume} / {count} 笔",
-    bondingText: "联合曲线中仍有 <strong>{remaining} {symbol}</strong> 可供出售；当前底池 <strong>{raised}</strong>。"
+    bondingText: "联合曲线中仍有 <strong>{remaining} {symbol}</strong> 可供出售；当前底池 <strong>{raised}</strong>。",
+    dividendClaimable: "可领分红",
+    dividendTotal: "累计分红",
+    dividendClaimAction: "领取分红",
+    dividendClaiming: "领取中...",
+    dividendClaimPending: "正在发起分红领取交易...",
+    dividendClaimSubmitted: "分红领取交易已提交：{hash}",
+    dividendClaimSuccess: "分红已领取到钱包。",
+    dividendClaimFailed: "领取分红失败。"
   },
   en: {
     tabMarket: "Market",
@@ -1667,7 +1851,7 @@ const translations = {
     taxFull: "Allocation is full at 100%.",
     taxInvalid: "Current allocation is {total}%; it must equal exactly 100%.",
     taxMarketingRow: "Marketing wallet (marketing, donations, BNB)",
-    taxBurnRow: "Burn (reduce supply)",
+    taxBurnRow: "Burn (send to dead wallet, fixed supply)",
     taxRewardRow: "Holder rewards (>= 1 token auto BNB)",
     taxLpRow: "Return to LP (BNB auto into project pool)",
     summarySupply: "Total supply",
@@ -1704,7 +1888,7 @@ const translations = {
     treasuryInternalCopy: "During the internal phase, each wallet can buy 1-100 tokens. After the target pool is reached, the project launches to Pancake Swap.",
     treasuryTaxKicker: "Project tax",
     treasuryTaxTitle: "Four-way allocation",
-    treasuryTaxCopy: "Marketing receives BNB; holders with at least 1 token receive rewards automatically; LP flow returns to the project pool; burn reduces supply.",
+    treasuryTaxCopy: "Marketing receives BNB; holders with at least 1 token receive rewards automatically; LP flow returns to the project pool; burn sends tokens to the dead wallet while total supply stays fixed.",
     treasuryLaunchKicker: "External launch",
     treasuryLaunchTitle: "LP test custody",
     treasuryLaunchCopy: "For testing, projects can launch Pancake liquidity with a manual 0.05-8 BNB threshold, and LP tokens are sent to the platform wallet.",
@@ -1760,7 +1944,15 @@ const translations = {
     tradeInternalDescription: "This project is still inside roo. It can launch to Pancake Swap after reaching its threshold.",
     tradeUnsyncedWarning: "This project has not synced an on-chain projectId yet, so trading is temporarily unavailable.",
     tradeVolumeTemplate: "{volume} / {count} trades",
-    bondingText: "The bonding curve still has <strong>{remaining} {symbol}</strong> available; current pool <strong>{raised}</strong>."
+    bondingText: "The bonding curve still has <strong>{remaining} {symbol}</strong> available; current pool <strong>{raised}</strong>.",
+    dividendClaimable: "Claimable",
+    dividendTotal: "Distributed",
+    dividendClaimAction: "Claim",
+    dividendClaiming: "Claiming...",
+    dividendClaimPending: "Submitting dividend claim transaction...",
+    dividendClaimSubmitted: "Dividend claim submitted: {hash}",
+    dividendClaimSuccess: "Dividend sent to your wallet.",
+    dividendClaimFailed: "Dividend claim failed."
   }
 };
 
@@ -2004,17 +2196,18 @@ function refreshOpenModalTranslations() {
   if ($("#devBuyModal") && !$("#devBuyModal").hidden) {
     updateDevBuyModalQuote();
   }
-  if ($("#tradeModal") && !$("#tradeModal").hidden && state.selectedProject) {
-    const project = state.selectedProject;
-    const contractAddress = project.contract || project.creator || ZERO_ADDRESS;
-    $("#tradeContract").textContent = `${t("contractLabel")} ${shortAddress(contractAddress)}`;
-    $("#copyTradeContract").textContent = t("copyButton");
-    $("#tradeCreator").textContent = `${t("creatorLabelFull")} ${project.creator}`;
-    $("#infoDescription").textContent = project.listed
-      ? t("tradeListedDescription")
-      : t("tradeInternalDescription");
+    if ($("#tradeModal") && !$("#tradeModal").hidden && state.selectedProject) {
+      const project = state.selectedProject;
+      const contractAddress = project.contract || project.creator || ZERO_ADDRESS;
+      $("#tradeContract").textContent = `${t("contractLabel")} ${shortAddress(contractAddress)}`;
+      $("#copyTradeContract").textContent = t("copyButton");
+      $("#tradeCreator").textContent = `${t("creatorLabelFull")} ${project.creator}`;
+      renderTradeMetaRow(project);
+      $("#infoDescription").textContent = project.listed
+        ? t("tradeListedDescription")
+        : t("tradeInternalDescription");
+    }
   }
-}
 
 function setLanguage(lang) {
   state.language = lang || "zh";
@@ -2498,6 +2691,9 @@ function addCreatedProject(params, created) {
     contract: created.token,
     projectId: created.projectId,
     launchpadAddress: config.launchpadAddress,
+    projectTaxBps: Number(params.projectMechanismTaxBps || 0),
+    taxEnabled: Boolean(params.taxEnabled),
+    metadata: params.metadata,
     change: 0,
     listed: false,
     avatar: params.symbol.slice(0, 1),
@@ -2519,13 +2715,42 @@ async function autoVerifyCreatedToken(params, created) {
     if (result.skipped) {
       return "开源待配置：请在后端设置 BSCSCAN_API_KEY。";
     }
-    const message = result.data && (result.data.result || result.data.message)
-      ? (result.data.result || result.data.message)
+    const initialMessage = result.data && (result.data.result || result.data.message)
+      ? String(result.data.result || result.data.message)
       : "已提交开源验证。";
-    return `已提交自动开源：${message}`;
+    if (String(result.data && result.data.status || "") === "1" && result.data && result.data.result) {
+      const verifyStatus = await pollVerificationStatus(config.chainId || 56, result.data.result);
+      return `自动开源完成：${verifyStatus}`;
+    }
+    return `已提交自动开源：${initialMessage}`;
   } catch (error) {
     return `自动开源提交失败：${error.message || "请检查后端和 BscScan API Key"}`;
   }
+}
+
+async function pollVerificationStatus(chainId, guid) {
+  const maxChecks = Number(config.verifyStatusMaxChecks || 18);
+  const delayMs = Number(config.verifyStatusDelayMs || 5000);
+  for (let attempt = 0; attempt < maxChecks; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    const result = await apiPost("/api/verify-status", { chainId, guid });
+    const status = String(result && result.data && result.data.status || "");
+    const message = String(result && result.data && (result.data.result || result.data.message) || "");
+    const normalized = message.toLowerCase();
+    if (status === "1") {
+      return message || "验证成功";
+    }
+    if (
+      normalized.includes("pending")
+      || normalized.includes("queue")
+      || normalized.includes("in progress")
+      || normalized.includes("please try again")
+    ) {
+      continue;
+    }
+    return message || "验证失败";
+  }
+  return "验证排队中，请稍后去 BscScan 查看结果。";
 }
 
 function getLaunchpadContract(signerOrProvider, launchpadAddress = config.launchpadAddress) {
@@ -2915,6 +3140,7 @@ async function refreshTradeData(project) {
     renderTradeTable(project);
     renderHolderList(project || { symbol: "" }, []);
     drawTradeChart(project);
+    refreshTradeDividendInfo(project).catch(() => {});
     return;
   }
   try {
@@ -2939,10 +3165,12 @@ async function refreshTradeData(project) {
     renderHolderList(project, trades);
     updateTradeStats(project, trades);
     drawTradeChart(project, candles);
+    await refreshTradeDividendInfo(project);
   } catch {
     renderTradeTable(project);
     renderHolderList(project, []);
     drawTradeChart(project);
+    await refreshTradeDividendInfo(project);
   }
 }
 
@@ -2968,6 +3196,7 @@ async function refreshOpenTradeProjectFromChain(project) {
     const displayProgress = getDisplayProgress(freshProject);
     $("#bondingValue").textContent = `${displayProgress}%`;
     $("#bondingBar").style.width = `${displayProgress}%`;
+    renderTradeMetaRow(freshProject);
     renderProjectSocialLinks(freshProject);
     $("#infoDescription").textContent = freshProject.listed
       ? t("tradeListedDescription")
@@ -2975,6 +3204,7 @@ async function refreshOpenTradeProjectFromChain(project) {
     updateTradeStats(freshProject, []);
     updateBuyCapQuote(freshProject);
     estimateSwapReceive();
+    refreshTradeDividendInfo(freshProject).catch(() => {});
     refreshTradeData(freshProject);
   } catch {
     // Keep the cached project visible if the RPC read fails.
@@ -2998,6 +3228,7 @@ function openTradeModal(project) {
   $("#copyTradeContract").textContent = t("copyButton");
   $("#tradeCreator").textContent = `${t("creatorLabelFull")} ${project.creator}`;
   $("#tradeChange").textContent = `+${project.change}%`;
+  renderTradeMetaRow(project);
   updateTradeStats(project, []);
   const displayProgress = getDisplayProgress(project);
   $("#bondingValue").textContent = `${displayProgress}%`;
@@ -3011,6 +3242,7 @@ function openTradeModal(project) {
   if (project.projectId === undefined || project.projectId === null) {
     $("#swapReceive").textContent = t("tradeUnsyncedWarning");
   }
+  refreshTradeDividendInfo(project).catch(() => {});
   refreshTradeData(project);
   setSwapSide("buy");
   $("#tradeModal").hidden = false;
@@ -3818,6 +4050,14 @@ function bindEvents() {
 
   $("#tradeContract").addEventListener("click", copyTradeContract);
   $("#copyTradeContract").addEventListener("click", copyTradeContract);
+  $("#tradeMetaRow").addEventListener("click", async (event) => {
+    const claimButton = event.target.closest("[data-claim-dividend]");
+    if (!claimButton) {
+      return;
+    }
+    event.preventDefault();
+    await handleClaimDividend();
+  });
 
   $$(".swap-tabs button").forEach((button) => {
     button.addEventListener("click", () => setSwapSide(button.dataset.swapSide));
@@ -3893,6 +4133,9 @@ function bindEvents() {
       await connectWallet();
       setCreateStatus(t("walletReadyStatus"), "success");
       renderParams(state.wallet);
+      if ($("#tradeModal") && !$("#tradeModal").hidden && state.selectedProject) {
+        refreshTradeDividendInfo(state.selectedProject).catch(() => {});
+      }
     } catch (error) {
       setCreateStatus(error.message || t("walletConnectFailed"), "error");
     }

@@ -71,7 +71,7 @@ apiBaseUrl: ""
 
 ## 链上创建配置
 
-1. 部署 `contracts/FourBscLaunchpad.sol`。
+1. 部署 `contracts/RooBscLaunchpad.sol`。
 2. 打开 `config.js`，填写 `launchpadAddress` 为已部署的发射台合约地址。
 3. 把 `platformFeeWallet` 改成平台收款钱包。
 4. 在创建页填写项目名称、符号和发射阈值。
@@ -83,7 +83,7 @@ apiBaseUrl: ""
 
 ## 合约
 
-`contracts/FourBscLaunchpad.sol` 是自包含合约草案，包含：
+`contracts/RooBscLaunchpad.sol` 是自包含合约草案，包含：
 
 - `createProject` 创建限购项目和项目代币。
 - `createProjectVanity` 使用 `CREATE2` 创建尾号 `0000` 的代币合约地址；前端会先向后端 `/api/vanity-salt` 生成 salt，再提交链上交易。
@@ -101,4 +101,4 @@ apiBaseUrl: ""
 正式上主网前需要用 Hardhat/Foundry 做单元测试、审计和 Pancake 流动性流程测试。
 
 注意：尾号 `0000` 需要部署包含 `createProjectVanity` 的新版发射台合约。旧版已部署合约如果只有 `createProject`，不能保证代币合约尾号。
-后端生成 salt 时会读取 `build-vanity/contracts_FourBscLaunchpad_sol_LaunchpadToken.bin`，部署前如果修改了 `LaunchpadToken` 源码，需要重新编译并更新这个文件。
+后端生成 salt 时会读取 `build-vanity/contracts_RooBscLaunchpad_sol_LaunchpadToken.bin`，部署前如果修改了 `LaunchpadToken` 源码，需要重新编译并更新这个文件。

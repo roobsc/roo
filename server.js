@@ -37,8 +37,8 @@ const publicRoot = path.join(root, "public");
 const port = Number(process.env.PORT || 4301);
 const dataDir = path.join(root, "data");
 const dbPath = path.join(dataDir, "launchpad-db.json");
-const launchpadSourcePath = path.join(root, "contracts", "FourBscLaunchpad.sol");
-const launchpadTokenBinPath = path.join(root, "build-vanity", "contracts_FourBscLaunchpad_sol_LaunchpadToken.bin");
+const launchpadSourcePath = path.join(root, "contracts", "RooBscLaunchpad.sol");
+const launchpadTokenBinPath = path.join(root, "build-vanity", "contracts_RooBscLaunchpad_sol_LaunchpadToken.bin");
 const bscscanApiUrl = process.env.BSCSCAN_API_URL || "https://api.etherscan.io/v2/api";
 const bscscanApiKey = process.env.BSCSCAN_API_KEY || "";
 const postgresUrl = process.env.POSTGRES_URL || process.env.DATABASE_URL || "";
@@ -532,7 +532,7 @@ function buildStandardJsonInput() {
   return JSON.stringify({
     language: "Solidity",
     sources: {
-      "contracts/FourBscLaunchpad.sol": {
+      "contracts/RooBscLaunchpad.sol": {
         content: source
       }
     },
@@ -708,15 +708,17 @@ async function submitTokenVerification(args) {
     };
   }
 
+  const requestUrl = new URL(bscscanApiUrl);
+  requestUrl.searchParams.set("apikey", bscscanApiKey);
+  requestUrl.searchParams.set("chainid", String(args.chainId || 56));
+  requestUrl.searchParams.set("module", "contract");
+  requestUrl.searchParams.set("action", "verifysourcecode");
+
   const form = new URLSearchParams();
-  form.set("apikey", bscscanApiKey);
-  form.set("chainid", String(args.chainId || 56));
-  form.set("module", "contract");
-  form.set("action", "verifysourcecode");
   form.set("contractaddress", args.contractAddress);
   form.set("sourceCode", buildStandardJsonInput());
   form.set("codeformat", "solidity-standard-json-input");
-  form.set("contractname", "contracts/FourBscLaunchpad.sol:LaunchpadToken");
+  form.set("contractname", "contracts/RooBscLaunchpad.sol:LaunchpadToken");
   form.set("compilerversion", "v0.8.24+commit.e11b9ed9");
   form.set("optimizationUsed", "1");
   form.set("runs", "200");
@@ -724,7 +726,7 @@ async function submitTokenVerification(args) {
   form.set("evmVersion", "default");
   form.set("licenseType", "3");
 
-  const response = await fetch(bscscanApiUrl, {
+  const response = await fetch(requestUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded"
@@ -752,18 +754,19 @@ async function checkVerificationStatus(args) {
       message: "Missing BSCSCAN_API_KEY environment variable"
     };
   }
-  const form = new URLSearchParams();
-  form.set("apikey", bscscanApiKey);
-  form.set("chainid", String(args.chainId || 56));
-  form.set("module", "contract");
-  form.set("action", "checkverifystatus");
-  form.set("guid", args.guid);
-  const response = await fetch(bscscanApiUrl, {
+
+  const requestUrl = new URL(bscscanApiUrl);
+  requestUrl.searchParams.set("apikey", bscscanApiKey);
+  requestUrl.searchParams.set("chainid", String(args.chainId || 56));
+  requestUrl.searchParams.set("module", "contract");
+  requestUrl.searchParams.set("action", "checkverifystatus");
+  requestUrl.searchParams.set("guid", args.guid);
+
+  const response = await fetch(requestUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded"
-    },
-    body: form
+    }
   });
   const text = await response.text();
   let data;
