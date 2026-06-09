@@ -128,7 +128,7 @@ contract LaunchpadToken {
  * - Creator chooses one-wallet buy cap from 1 to 100 tokens.
  * - Creator chooses manual launch threshold from 0.05 to 8 BNB in testing mode.
  * - Internal market buy/sell charges 1% platform BNB tax.
- * - After launch, platform tax is disabled and LP tokens are sent to burn address.
+ * - After launch, platform tax is disabled and LP tokens are sent to a configurable receiver.
  * - Project mechanism tax pays marketing in BNB, auto-pays holder dividends, and returns LP tax to the pool.
  * - Burn allocation reduces token supply instead of sending project tokens to wallets.
  */
@@ -191,6 +191,7 @@ contract FourBscLaunchpad {
     IPancakeV2Router public pancakeRouter;
     address public owner;
     address public platformFeeWallet;
+    address public launchLpReceiver;
     uint256 public projectCount;
     bool private locked;
 
@@ -202,6 +203,7 @@ contract FourBscLaunchpad {
 
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     event PlatformFeeWalletUpdated(address indexed previousWallet, address indexed newWallet);
+    event LaunchLpReceiverUpdated(address indexed previousReceiver, address indexed newReceiver);
     event PancakeRouterUpdated(address indexed previousRouter, address indexed newRouter);
     event ProjectCreated(
         uint256 indexed projectId,
@@ -269,8 +271,10 @@ contract FourBscLaunchpad {
         pancakeRouter = IPancakeV2Router(router);
         owner = msg.sender;
         platformFeeWallet = initialPlatformFeeWallet;
+        launchLpReceiver = initialPlatformFeeWallet;
         emit OwnershipTransferred(address(0), msg.sender);
         emit PlatformFeeWalletUpdated(address(0), initialPlatformFeeWallet);
+        emit LaunchLpReceiverUpdated(address(0), initialPlatformFeeWallet);
         emit PancakeRouterUpdated(address(0), router);
     }
 
@@ -544,7 +548,7 @@ contract FourBscLaunchpad {
             tokenAmount,
             0,
             0,
-            BURN_ADDRESS,
+            launchLpReceiver,
             block.timestamp + 900
         ) {
             project.launched = true;
@@ -637,6 +641,13 @@ contract FourBscLaunchpad {
         address previous = platformFeeWallet;
         platformFeeWallet = newWallet;
         emit PlatformFeeWalletUpdated(previous, newWallet);
+    }
+
+    function setLaunchLpReceiver(address newReceiver) external onlyOwner {
+        require(newReceiver != address(0), "LAUNCHPAD: zero lp receiver");
+        address previous = launchLpReceiver;
+        launchLpReceiver = newReceiver;
+        emit LaunchLpReceiverUpdated(previous, newReceiver);
     }
 
     function transferOwnership(address newOwner) external onlyOwner {
