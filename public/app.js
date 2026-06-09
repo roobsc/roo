@@ -1014,7 +1014,7 @@ const translations = {
     walletMissing: "未检测到钱包",
     walletNotConnected: "未连接",
     notFilled: "未填写",
-    createEyebrow: "Create BSC Project",
+    createEyebrow: "创建 BSC 项目",
     createTitle: "创建限购发射项目",
     updatePreview: "更新预览",
     projectAvatar: "项目头像",
@@ -1035,6 +1035,12 @@ const translations = {
     manualWalletCap: "手动限购 1-100 枚",
     tokenUnit: "枚",
     noWalletCap: "不限购",
+    devBuyModalTitle: "选择你想买入的代币数量",
+    devBuyModalCopy: "创建代币时必须进行 dev 首买，创建和买入会在同一笔链上交易中完成，避免第二笔交易被抢跑。另收 0.01 BNB 保护费进入平台钱包。",
+    devBuySwitchLabel: "以 BNB 买入",
+    confirmDevBuy: "确认买入！",
+    devBuyReceiveText: "你将收到约 {amount} {symbol}",
+    devBuyCostText: "保护费：0.01 BNB，总支付约 {amount}",
     launchThresholdTitle: "发射阈值",
     projectTax: "项目税收",
     enableTax: "启用税收",
@@ -1081,7 +1087,7 @@ const translations = {
     networkSwitchFailed: "切换 BSC 网络失败。",
     avatarTypeError: "头像只支持 PNG、JPG、WebP 格式。",
     avatarSizeError: "头像需要小于 2MB，请压缩后再上传。",
-    treasuryEyebrow: "Treasury",
+    treasuryEyebrow: "金库",
     treasuryTitle: "项目金库流向",
     treasuryInternalKicker: "内盘交易",
     treasuryInternalTitle: "限购成交",
@@ -1092,7 +1098,7 @@ const translations = {
     treasuryLaunchKicker: "外盘发射",
     treasuryLaunchTitle: "LP 黑洞",
     treasuryLaunchCopy: "测试阶段可用 0.05-8 BNB 的手动阈值创建 Pancake 流动池，LP token 发送到黑洞。",
-    profileEyebrow: "Profile",
+    profileEyebrow: "个人资料",
     profileTitle: "个人资料",
     profileWalletLabel: "钱包",
     profileCreatedLabel: "创建项目",
@@ -1127,8 +1133,17 @@ const translations = {
     poolLabel: "底池",
     statusListed: "已上线",
     statusInternal: "内盘",
-    loadingProjects: "Loading microsales...",
-    emptyProjects: "暂无真实项目。请创建项目，或点击刷新同步链上历史项目。"
+    loadingProjects: "正在加载项目...",
+    emptyProjects: "暂无真实项目。请创建项目，或点击刷新同步链上历史项目。",
+    contractLabel: "合约",
+    creatorLabelFull: "创建者",
+    copyButton: "复制",
+    copiedButton: "已复制",
+    tradeListedDescription: "该项目已上线 Pancake Swap，可从外盘继续交易。",
+    tradeInternalDescription: "该项目仍在 roo 内盘，达到发射阈值后可进入 Pancake Swap。",
+    tradeUnsyncedWarning: "这个项目还没有同步到链上 projectId，暂时不能交易。",
+    tradeVolumeTemplate: "{volume} / {count} 笔",
+    bondingText: "联合曲线中仍有 <strong>{remaining} {symbol}</strong> 可供出售；当前底池 <strong>{raised}</strong>。"
   },
   en: {
     tabMarket: "Market",
@@ -1183,6 +1198,12 @@ const translations = {
     manualWalletCap: "Manual limit 1-100 tokens",
     tokenUnit: "tokens",
     noWalletCap: "No limit",
+    devBuyModalTitle: "Choose your first-buy amount",
+    devBuyModalCopy: "A dev first buy is required when creating a token. Creation and buy happen in the same on-chain transaction to prevent second-transaction sniping. A 0.01 BNB protection fee is also sent to the platform wallet.",
+    devBuySwitchLabel: "Buy with BNB",
+    confirmDevBuy: "Confirm Buy!",
+    devBuyReceiveText: "You will receive about {amount} {symbol}",
+    devBuyCostText: "Protection fee: 0.01 BNB, total about {amount}",
     launchThresholdTitle: "Launch threshold",
     projectTax: "Project tax",
     enableTax: "Enable tax",
@@ -1276,7 +1297,16 @@ const translations = {
     statusListed: "Listed",
     statusInternal: "Internal",
     loadingProjects: "Loading microsales...",
-    emptyProjects: "No real projects yet. Create one or refresh to sync chain history."
+    emptyProjects: "No real projects yet. Create one or refresh to sync chain history.",
+    contractLabel: "Contract",
+    creatorLabelFull: "Creator",
+    copyButton: "Copy",
+    copiedButton: "Copied",
+    tradeListedDescription: "This project is listed on Pancake Swap and can continue trading externally.",
+    tradeInternalDescription: "This project is still inside roo. It can launch to Pancake Swap after reaching its threshold.",
+    tradeUnsyncedWarning: "This project has not synced an on-chain projectId yet, so trading is temporarily unavailable.",
+    tradeVolumeTemplate: "{volume} / {count} trades",
+    bondingText: "The bonding curve still has <strong>{remaining} {symbol}</strong> available; current pool <strong>{raised}</strong>."
   }
 };
 
@@ -1362,6 +1392,22 @@ function closeMenu() {
   document.body.classList.remove("drawer-open");
 }
 
+function refreshOpenModalTranslations() {
+  if ($("#devBuyModal") && !$("#devBuyModal").hidden) {
+    updateDevBuyModalQuote();
+  }
+  if ($("#tradeModal") && !$("#tradeModal").hidden && state.selectedProject) {
+    const project = state.selectedProject;
+    const contractAddress = project.contract || project.creator || ZERO_ADDRESS;
+    $("#tradeContract").textContent = `${t("contractLabel")} ${shortAddress(contractAddress)}`;
+    $("#copyTradeContract").textContent = t("copyButton");
+    $("#tradeCreator").textContent = `${t("creatorLabelFull")} ${project.creator}`;
+    $("#infoDescription").textContent = project.listed
+      ? t("tradeListedDescription")
+      : t("tradeInternalDescription");
+  }
+}
+
 function setLanguage(lang) {
   state.language = lang || "zh";
   $$(".language-toggle button").forEach((button) => {
@@ -1384,6 +1430,7 @@ function setLanguage(lang) {
   }
   updateTaxState();
   updateCreateState();
+  refreshOpenModalTranslations();
   if ($("#projectList")) {
     renderProjects();
   }
@@ -2007,10 +2054,15 @@ function updateTradeStats(project, trades = []) {
   $("#tradePrice").textContent = summary.priceBnb > 0 ? formatBnb(summary.priceBnb, 8) : "--";
   $("#tradeMarketCap").textContent = formatUsd(summary.marketCap, 2);
   $("#tradeLiquidity").textContent = formatUsd(liquidityUsd, 2);
-  $("#tradeVolume").textContent = `${formatUsd(summary.volumeUsd, 2)} / ${summary.count} 笔`;
+  $("#tradeVolume").textContent = t("tradeVolumeTemplate")
+    .replace("{volume}", formatUsd(summary.volumeUsd, 2))
+    .replace("{count}", summary.count);
   $("#tradeCreated").textContent = formatCreatedTime(project);
   const remaining = Math.max(0, 10_000 - Number(project.tokensSold || 0));
-  $("#bondingText").innerHTML = `联合曲线中仍有 <strong>${remaining.toLocaleString(undefined, { maximumFractionDigits: 3 })} ${project.symbol}</strong> 可供出售；当前底池 <strong>${project.raised}</strong>。`;
+  $("#bondingText").innerHTML = t("bondingText")
+    .replace("{remaining}", remaining.toLocaleString(undefined, { maximumFractionDigits: 3 }))
+    .replace("{symbol}", project.symbol)
+    .replace("{raised}", project.raised);
 }
 
 function setTradeView(view) {
@@ -2099,11 +2151,11 @@ function openTradeModal(project) {
   $("#infoAvatar").innerHTML = avatarMarkup;
   $("#tradePair").textContent = `${project.symbol} / BNB`;
   const contractAddress = project.contract || project.creator || ZERO_ADDRESS;
-  $("#tradeContract").textContent = `合约 ${shortAddress(contractAddress)}`;
+  $("#tradeContract").textContent = `${t("contractLabel")} ${shortAddress(contractAddress)}`;
   $("#tradeContract").dataset.address = contractAddress;
   $("#copyTradeContract").dataset.address = contractAddress;
-  $("#copyTradeContract").textContent = "复制";
-  $("#tradeCreator").textContent = `创建者 ${project.creator}`;
+  $("#copyTradeContract").textContent = t("copyButton");
+  $("#tradeCreator").textContent = `${t("creatorLabelFull")} ${project.creator}`;
   $("#tradeChange").textContent = `+${project.change}%`;
   updateTradeStats(project, []);
   $("#bondingValue").textContent = `${project.progress}%`;
@@ -2111,10 +2163,10 @@ function openTradeModal(project) {
   $("#infoName").textContent = project.name;
   $("#infoSymbol").textContent = project.symbol;
   $("#infoDescription").textContent = project.listed
-    ? "该项目已上线 Pancake Swap，可从外盘继续交易。"
-    : "该项目仍在 roo 内盘，达到发射阈值后可进入 Pancake Swap。";
+    ? t("tradeListedDescription")
+    : t("tradeInternalDescription");
   if (project.projectId === undefined || project.projectId === null) {
-    $("#swapReceive").textContent = "这个项目还没有同步到链上 projectId，暂时不能交易。";
+    $("#swapReceive").textContent = t("tradeUnsyncedWarning");
   }
   refreshTradeData(project);
   setSwapSide("buy");
@@ -2149,11 +2201,11 @@ async function copyTradeContract(event) {
     return;
   }
   await copyText(address);
-  $("#copyTradeContract").textContent = "已复制";
-  $("#tradeContract").textContent = `合约 ${shortAddress(address)} 已复制`;
+  $("#copyTradeContract").textContent = t("copiedButton");
+  $("#tradeContract").textContent = `${t("contractLabel")} ${shortAddress(address)} ${t("copiedButton")}`;
   setTimeout(() => {
-    $("#copyTradeContract").textContent = "复制";
-    $("#tradeContract").textContent = `合约 ${shortAddress(address)}`;
+    $("#copyTradeContract").textContent = t("copyButton");
+    $("#tradeContract").textContent = `${t("contractLabel")} ${shortAddress(address)}`;
   }, 1300);
 }
 
@@ -2516,8 +2568,11 @@ function updateDevBuyModalQuote() {
   const tokens = estimateInitialBuyTokens(amount, params);
   state.devBuyBnb = amount;
   state.devBuyTokens = tokens;
-  $("#devBuyReceiveText").textContent = `你将收到约 ${formatTokenAmount(tokens, 6)} ${params.symbol || "代币"}`;
-  $("#devBuyCostText").textContent = `保护费：0.01 BNB，总支付约 ${formatBnb(amount + 0.01, 6)}`;
+  $("#devBuyReceiveText").textContent = t("devBuyReceiveText")
+    .replace("{amount}", formatTokenAmount(tokens, 6))
+    .replace("{symbol}", params.symbol || t("tokenUnit"));
+  $("#devBuyCostText").textContent = t("devBuyCostText")
+    .replace("{amount}", formatBnb(amount + 0.01, 6));
 }
 
 function openDevBuyModal(params) {
