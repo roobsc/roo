@@ -1845,6 +1845,7 @@ async function estimateSwapReceive() {
         const bnbAmount = ethers.parseEther(String(amount));
         const estimated = await estimateTokenAmountForBnb(launchpad, BigInt(tradeProject.projectId), bnbAmount, maxTokenAmount);
         if (estimated > 0n) {
+          $("#buyTokenAmount").value = Number(ethers.formatEther(estimated)).toFixed(6);
           $("#swapReceive").textContent = `您将收到: ${Number(ethers.formatEther(estimated)).toFixed(6)} ${project.symbol}`;
           return;
         }
@@ -1867,6 +1868,7 @@ async function estimateSwapReceive() {
       return;
     }
     const estimated = price > 0 ? amount / price : 0;
+    $("#buyTokenAmount").value = estimated > 0 ? estimated.toFixed(6) : "";
     $("#swapReceive").textContent = `您将收到: ${estimated.toFixed(6)} ${project.symbol}`;
     return;
   }
