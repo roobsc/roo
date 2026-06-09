@@ -1,8 +1,28 @@
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
+const os = require("node:os");
+const { Worker, isMainThread, parentPort, workerData } = require("node:worker_threads");
 const postgres = require("postgres");
 const { put } = require("@vercel/blob");
+
+if (!isMainThread) {
+  const { ethers } = require("ethers");
+  const args = workerData;
+  const suffix = String(args.suffix || "0000").toLowerCase().replace(/^0x/, "");
+  const seed = args.seed;
+  for (let attempt = args.start; attempt < args.maxAttempts; attempt += args.step) {
+    const userSalt = ethers.keccak256(ethers.toUtf8Bytes(`${seed}:${attempt}`));
+    const salt = ethers.keccak256(ethers.solidityPacked(["address", "bytes32"], [args.creator, userSalt]));
+    const predicted = ethers.getCreate2Address(args.launchpadAddress, salt, args.initCodeHash);
+    if (predicted.toLowerCase().endsWith(suffix)) {
+      parentPort.postMessage({ userSalt, predicted, attempts: attempt + 1, suffix });
+      process.exit(0);
+    }
+  }
+  parentPort.postMessage(null);
+  process.exit(0);
+}
 
 const root = __dirname;
 const publicRoot = path.join(root, "public");
@@ -557,6 +577,70 @@ function findVanitySalt(args) {
   throw new Error(`No vanity salt found in ${maxAttempts} attempts`);
 }
 
+async function findVanitySaltParallel(args) {
+  const ethers = getEthers();
+  if (!ethers) {
+    throw new Error("ethers dependency is required for vanity salt generation");
+  }
+  if (!ethers.isAddress(args.launchpadAddress) || !ethers.isAddress(args.creator)) {
+    throw new Error("Invalid launchpad or creator address");
+  }
+  const suffix = String(args.suffix || "0000").toLowerCase().replace(/^0x/, "");
+  if (!/^[0-9a-f]{1,8}$/.test(suffix)) {
+    throw new Error("Invalid vanity suffix");
+  }
+  const maxAttempts = Math.min(Number(args.maxAttempts || 240000), 1_000_000);
+  const workerCount = Math.max(2, Math.min(Number(process.env.VANITY_WORKERS || 6), os.cpus().length || 2, 8));
+  const seed = `${args.creator}:${args.tokenName}:${args.tokenSymbol}:${Date.now()}:${Math.random()}`;
+  const initCodeHash = args.initCodeHash || getLaunchpadTokenInitCodeHash(args);
+
+  return new Promise((resolve, reject) => {
+    const workers = [];
+    let finished = 0;
+    let settled = false;
+    const cleanup = () => workers.forEach((worker) => worker.terminate().catch(() => {}));
+
+    for (let index = 0; index < workerCount; index += 1) {
+      const worker = new Worker(__filename, {
+        workerData: {
+          launchpadAddress: args.launchpadAddress,
+          creator: args.creator,
+          suffix,
+          seed,
+          initCodeHash,
+          maxAttempts,
+          start: index,
+          step: workerCount
+        }
+      });
+      workers.push(worker);
+      worker.on("message", (result) => {
+        if (settled) {
+          return;
+        }
+        if (result) {
+          settled = true;
+          cleanup();
+          resolve({ ...result, workers: workerCount });
+        }
+      });
+      worker.on("error", (error) => {
+        if (!settled) {
+          settled = true;
+          cleanup();
+          reject(error);
+        }
+      });
+      worker.on("exit", () => {
+        finished += 1;
+        if (!settled && finished === workerCount) {
+          reject(new Error(`No vanity salt found in ${maxAttempts} attempts`));
+        }
+      });
+    }
+  });
+}
+
 async function submitTokenVerification(args) {
   if (!bscscanApiKey) {
     return {
@@ -690,7 +774,7 @@ async function handleApi(req, res, url) {
 
   if (req.method === "POST" && url.pathname === "/api/vanity-salt") {
     const payload = await readJsonBody(req);
-    const result = findVanitySalt({
+    const result = await findVanitySaltParallel({
       launchpadAddress: payload.launchpadAddress,
       creator: payload.creator,
       tokenName: payload.tokenName,

@@ -41,7 +41,7 @@ const LAUNCHPAD_ABI = [
       { name: "projectId", type: "uint256" },
       { name: "token", type: "address" }
     ],
-    stateMutability: "nonpayable",
+    stateMutability: "payable",
     type: "function"
   },
   {
@@ -83,7 +83,7 @@ const LAUNCHPAD_ABI = [
       { name: "projectId", type: "uint256" },
       { name: "token", type: "address" }
     ],
-    stateMutability: "nonpayable",
+    stateMutability: "payable",
     type: "function"
   },
   {
@@ -158,6 +158,49 @@ const LAUNCHPAD_ABI = [
     name: "sell",
     outputs: [],
     stateMutability: "nonpayable",
+    type: "function"
+  },
+  {
+    inputs: [
+      {
+        name: "config",
+        type: "tuple",
+        components: [
+          { name: "tokenName", type: "string" },
+          { name: "tokenSymbol", type: "string" },
+          { name: "walletCapEnabled", type: "bool" },
+          { name: "walletCapTokens", type: "uint256" },
+          { name: "launchThresholdBnb", type: "uint256" },
+          { name: "marketingWallet", type: "address" }
+        ]
+      },
+      {
+        name: "taxConfig",
+        type: "tuple",
+        components: [
+          { name: "taxEnabled", type: "bool" },
+          { name: "projectTaxBps", type: "uint16" },
+          {
+            name: "allocation",
+            type: "tuple",
+            components: [
+              { name: "marketingBps", type: "uint16" },
+              { name: "burnBps", type: "uint16" },
+              { name: "dividendBps", type: "uint16" },
+              { name: "lpTreasuryBps", type: "uint16" }
+            ]
+          }
+        ]
+      },
+      { name: "userSalt", type: "bytes32" },
+      { name: "initialBuyTokenAmount", type: "uint256" }
+    ],
+    name: "createProjectVanityAndBuy",
+    outputs: [
+      { name: "projectId", type: "uint256" },
+      { name: "token", type: "address" }
+    ],
+    stateMutability: "payable",
     type: "function"
   },
   {
@@ -296,9 +339,12 @@ const state = {
   wallet: "",
   cap: Number(config.defaultBuyCapTokens || 25),
   threshold: Number(config.defaultLaunchThresholdBnb || 5),
-  avatarUrl: defaultAvatar,
+  avatarUrl: "",
   avatarFileName: "",
   walletCapEnabled: true,
+  pendingCreateParams: null,
+  devBuyBnb: 0,
+  devBuyTokens: 0,
   marketFilter: "all",
   marketSearch: "",
   hardCapFilter: "all",
@@ -574,6 +620,15 @@ async function findProjectByTokenAddress(tokenAddress) {
   if (existing) {
     return existing;
   }
+  if (!params.name) {
+    throw new Error("请填写项目名称。");
+  }
+  if (!params.symbol) {
+    throw new Error("请填写代币符号。");
+  }
+  if (!state.avatarFileName || !state.avatarUrl) {
+    throw new Error("请上传项目头像。");
+  }
   if (!hasConfiguredAddress(config.launchpadAddress)) {
     throw new Error("config.js 里还没有填写 launchpadAddress，无法从链上反查项目。");
   }
@@ -679,6 +734,32 @@ function formatBnb(value, digits = 6) {
     return "0 BNB";
   }
   return `${number.toFixed(digits).replace(/\.?0+$/, "")} BNB`;
+}
+
+function estimateInitialBuyTokens(bnbAmount, params) {
+  const bnb = Number(bnbAmount || 0);
+  const launchThreshold = Number(params.launchThresholdBnb || state.threshold || 0);
+  if (!Number.isFinite(bnb) || bnb <= 0 || !Number.isFinite(launchThreshold) || launchThreshold <= 0) {
+    return 0;
+  }
+  const projectTaxBps = Number(params.projectMechanismTaxBps || 0);
+  const totalTaxBps = 100 + projectTaxBps;
+  const poolBudget = bnb * (10_000 - totalTaxBps) / 10_000;
+  const supply = 10_000;
+  const cap = params.walletCapEnabled ? Number(params.maxWalletBuyTokens || 0) : supply;
+  const maxTokens = Math.max(0, Math.min(cap || supply, supply));
+  let low = 0;
+  let high = maxTokens;
+  for (let index = 0; index < 80; index += 1) {
+    const mid = (low + high) / 2;
+    const poolCost = launchThreshold * ((mid * 0.5) / supply + (mid * mid) / (supply * supply));
+    if (poolCost <= poolBudget) {
+      low = mid;
+    } else {
+      high = mid;
+    }
+  }
+  return Math.max(0, Math.min(maxTokens, low));
 }
 
 function formatCreatedTime(project) {
@@ -2119,16 +2200,18 @@ function getTaxTotal() {
 }
 
 function updateAvatarPreview(url, fileName) {
-  state.avatarUrl = url || defaultAvatar;
+  state.avatarUrl = url || "";
   state.avatarFileName = fileName || "";
-  $("#avatarPreview").src = state.avatarUrl;
-  $("#previewAvatar").src = state.avatarUrl;
+  $("#avatarPreview").hidden = !state.avatarUrl;
+  $("#previewAvatar").hidden = !state.avatarUrl;
+  $("#avatarPreview").src = state.avatarUrl || "";
+  $("#previewAvatar").src = state.avatarUrl || "";
   $("#avatarFileName").textContent = state.avatarFileName || t("noImageSelected");
 }
 
 function updateCreateState() {
-  const name = $("#tokenName").value.trim() || "Meme Rocket";
-  const symbol = ($("#tokenSymbol").value.trim() || "MRKT").toUpperCase();
+  const name = $("#tokenName").value.trim();
+  const symbol = $("#tokenSymbol").value.trim().toUpperCase();
   const xLink = $("#xLink").value.trim();
   const telegramLink = $("#telegramLink").value.trim();
   const websiteLink = $("#websiteLink").value.trim();
@@ -2148,8 +2231,8 @@ function updateCreateState() {
   $("#thresholdValue").textContent = state.threshold;
   $("#summaryCap").textContent = state.walletCapEnabled ? `${state.cap} ${t("tokenUnit")}` : t("noWalletCap");
   $("#summaryThreshold").textContent = state.threshold;
-  $("#previewName").textContent = name;
-  $("#previewSymbol").textContent = `${symbol} / BSC`;
+  $("#previewName").textContent = name || "未填写项目名称";
+  $("#previewSymbol").textContent = `${symbol || "未填写"} / BSC`;
   $("#summaryX").textContent = compactLink(xLink);
   $("#summaryTelegram").textContent = compactLink(telegramLink);
   $("#summaryWebsite").textContent = compactLink(websiteLink);
@@ -2169,7 +2252,7 @@ function updateCreateState() {
 function buildMetadata() {
   return {
     avatarFileName: state.avatarFileName || "",
-    avatarUrl: state.avatarUrl || defaultAvatar,
+    avatarUrl: state.avatarUrl || "",
     x: $("#xLink").value.trim(),
     telegram: $("#telegramLink").value.trim(),
     website: $("#websiteLink").value.trim()
@@ -2183,13 +2266,15 @@ function buildCreateParams(fallbackWallet = "") {
     : ZERO_ADDRESS;
 
   return {
-    name: $("#tokenName").value.trim() || "Meme Rocket",
-    symbol: ($("#tokenSymbol").value.trim() || "MRKT").toUpperCase(),
+    name: $("#tokenName").value.trim(),
+    symbol: $("#tokenSymbol").value.trim().toUpperCase(),
     totalSupply: "10000",
     walletCapEnabled: state.walletCapEnabled,
     maxWalletBuyTokens: state.walletCapEnabled ? String(state.cap) : "0",
     launchThresholdBnb: String(state.threshold),
     launchThresholdWei: window.ethers ? ethers.parseEther(String(state.threshold)).toString() : "",
+    devBuyBnb: "0",
+    devBuyTokenAmount: "0",
     marketingWallet,
     metadata: buildMetadata(),
     launchpadAddress: config.launchpadAddress || "待填写",
@@ -2317,7 +2402,7 @@ async function findVanitySalt(params, creator, initCodeHash = "") {
 
 async function uploadAvatarForProject(params) {
   if (!state.avatarFileName || !state.avatarUrl || !state.avatarUrl.startsWith("data:")) {
-    return state.avatarUrl || defaultAvatar;
+    return state.avatarUrl || "";
   }
   const result = await apiPost("/api/upload-avatar", {
     fileName: state.avatarFileName,
@@ -2379,7 +2464,44 @@ async function verifyVanityWithLaunchpad(launchpad, params, vanity, wallet) {
   return predicted;
 }
 
+function updateDevBuyModalQuote() {
+  const params = state.pendingCreateParams || buildCreateParams(state.wallet);
+  const amount = Math.max(0, Number($("#devBuyBnbModal").value || 0));
+  const tokens = estimateInitialBuyTokens(amount, params);
+  state.devBuyBnb = amount;
+  state.devBuyTokens = tokens;
+  $("#devBuyReceiveText").textContent = `你将收到约 ${formatTokenAmount(tokens, 6)} ${params.symbol || "代币"}`;
+  $("#devBuyCostText").textContent = `保护费：0.01 BNB，总支付约 ${formatBnb(amount + 0.01, 6)}`;
+}
+
+function openDevBuyModal(params) {
+  state.pendingCreateParams = params;
+  $("#devBuyBnbModal").value = state.devBuyBnb > 0 ? String(state.devBuyBnb) : "";
+  updateDevBuyModalQuote();
+  $("#devBuyModal").hidden = false;
+  document.body.classList.add("modal-open");
+}
+
+function closeDevBuyModal() {
+  $("#devBuyModal").hidden = true;
+  document.body.classList.remove("modal-open");
+}
+
 async function handleCreateToken() {
+  try {
+    const params = buildCreateParams(state.wallet);
+    validateCreateRequest(params);
+    renderParams(state.wallet);
+    openDevBuyModal(params);
+  } catch (error) {
+    const message = error && (error.shortMessage || error.reason || error.message)
+      ? (error.shortMessage || error.reason || error.message)
+      : t("createFailedStatus");
+    setCreateStatus(message, "error");
+  }
+}
+
+async function submitCreateTokenWithDevBuy() {
   const buttons = [$("#createTokenButton"), $("#createTokenButtonSecondary")];
   buttons.forEach((button) => {
     button.disabled = true;
@@ -2387,9 +2509,19 @@ async function handleCreateToken() {
   });
 
   try {
+    const devBuyBnb = Math.max(0, Number($("#devBuyBnbModal").value || 0));
+    if (!Number.isFinite(devBuyBnb) || devBuyBnb <= 0) {
+      throw new Error("请输入大于 0 的首买 BNB 金额。");
+    }
     setCreateStatus(t("createConnectStatus"), "");
     const wallet = await connectWallet();
-    const params = buildCreateParams(wallet);
+    const params = state.pendingCreateParams || buildCreateParams(wallet);
+    const tokenAmountEstimate = estimateInitialBuyTokens(devBuyBnb, params);
+    if (tokenAmountEstimate <= 0) {
+      throw new Error("首买金额太小，请提高 BNB 金额。");
+    }
+    params.devBuyBnb = String(devBuyBnb);
+    params.devBuyTokenAmount = ethers.parseEther(String(tokenAmountEstimate.toFixed(12))).toString();
     validateCreateRequest(params);
     renderParams(wallet);
 
@@ -2430,7 +2562,21 @@ async function handleCreateToken() {
       allocation
     ];
 
-    const tx = await launchpad.createProjectVanity(projectConfig, projectTaxConfig, vanity.userSalt);
+    let tx;
+    try {
+      tx = await launchpad.createProjectVanityAndBuy(
+        projectConfig,
+        projectTaxConfig,
+        vanity.userSalt,
+        BigInt(params.devBuyTokenAmount),
+        { value: ethers.parseEther(String(devBuyBnb)) + ethers.parseEther("0.01") }
+      );
+    } catch (error) {
+      if (String(error.message || "").includes("createProjectVanityAndBuy")) {
+        throw new Error("当前发射台合约不是新版，不支持创建时 dev 第一笔买入。请先重新部署新合约并更新 config.js。");
+      }
+      throw error;
+    }
 
     setCreateStatus(t("createSubmittedStatus").replace("{hash}", tx.hash), "");
     const receipt = await tx.wait();
@@ -2450,6 +2596,8 @@ async function handleCreateToken() {
       });
       updateTabs("market");
       openTradeModal(project);
+      closeDevBuyModal();
+      state.pendingCreateParams = null;
     } else {
       setCreateStatus(t("createConfirmedNoEventStatus").replace("{hash}", tx.hash), "success");
     }
@@ -2469,7 +2617,7 @@ async function handleCreateToken() {
 function handleAvatarChange(event) {
   const [file] = event.target.files || [];
   if (!file) {
-    updateAvatarPreview(defaultAvatar, "");
+    updateAvatarPreview("", "");
     updateCreateState();
     return;
   }
@@ -2477,14 +2625,14 @@ function handleAvatarChange(event) {
   if (!allowedTypes.includes(file.type)) {
     setCreateStatus(t("avatarTypeError"), "error");
     event.target.value = "";
-    updateAvatarPreview(defaultAvatar, "");
+    updateAvatarPreview("", "");
     updateCreateState();
     return;
   }
   if (file.size > 2 * 1024 * 1024) {
     setCreateStatus(t("avatarSizeError"), "error");
     event.target.value = "";
-    updateAvatarPreview(defaultAvatar, "");
+    updateAvatarPreview("", "");
     updateCreateState();
     return;
   }
@@ -2677,6 +2825,11 @@ function bindEvents() {
   $$("[data-close-trade]").forEach((element) => {
     element.addEventListener("click", closeTradeModal);
   });
+  $$("[data-close-dev-buy]").forEach((element) => {
+    element.addEventListener("click", closeDevBuyModal);
+  });
+  $("#devBuyBnbModal").addEventListener("input", updateDevBuyModalQuote);
+  $("#confirmDevBuy").addEventListener("click", submitCreateTokenWithDevBuy);
 
   $("#tradeContract").addEventListener("click", copyTradeContract);
   $("#copyTradeContract").addEventListener("click", copyTradeContract);
@@ -2859,7 +3012,7 @@ function boot() {
   renderTradeTicker();
   renderProjects();
   loadBackendProjects().then(() => syncChainProjects());
-  updateAvatarPreview(defaultAvatar, "");
+  updateAvatarPreview("", "");
   updateTaxState();
   updateCreateState();
   bindEvents();

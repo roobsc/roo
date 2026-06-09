@@ -1550,6 +1550,129 @@ select {
   display: none;
 }
 
+.dev-buy-modal[hidden] {
+  display: none;
+}
+
+.dev-buy-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+
+.dev-buy-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(10px);
+}
+
+.dev-buy-dialog {
+  position: relative;
+  z-index: 1;
+  width: min(560px, 100%);
+  padding: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(14, 14, 18, 0.98);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.62);
+}
+
+.dev-buy-close {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  border: 0;
+  color: rgba(255, 255, 255, 0.72);
+  background: transparent;
+  font-size: 24px;
+}
+
+.dev-buy-dialog h2 {
+  margin: 0 0 18px;
+  color: var(--text-primary);
+  font-size: 28px;
+}
+
+.dev-buy-dialog p {
+  margin: 0 0 22px;
+  color: var(--muted);
+  line-height: 1.8;
+}
+
+.dev-buy-toggle,
+.dev-buy-input,
+.dev-buy-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.dev-buy-toggle {
+  justify-content: flex-end;
+  margin-bottom: 14px;
+  color: var(--text-primary);
+  font-weight: 900;
+}
+
+.dev-buy-toggle input {
+  display: none;
+}
+
+.dev-buy-toggle i {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.dev-buy-toggle i::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 23px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+}
+
+.dev-buy-input {
+  overflow: hidden;
+  margin-bottom: 20px;
+  border: 1px solid rgba(0, 240, 255, 0.22);
+  border-radius: 8px;
+  background: #171a22;
+}
+
+.dev-buy-input input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  padding: 16px;
+  color: var(--text-primary);
+  background: transparent;
+  font-size: 16px;
+}
+
+.dev-buy-input strong {
+  min-width: 88px;
+  padding: 16px;
+  border-left: 1px solid rgba(0, 240, 255, 0.16);
+  text-align: center;
+}
+
+.dev-buy-foot {
+  margin-top: 18px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
 .trade-modal {
   position: fixed;
   inset: 0;

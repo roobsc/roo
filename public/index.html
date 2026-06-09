@@ -187,7 +187,7 @@
                 <div class="media-grid">
                   <label class="avatar-uploader" for="avatarInput">
                     <input id="avatarInput" type="file" accept="image/png,image/jpeg,image/webp" />
-                    <img id="avatarPreview" src="./assets/roo-avatar.jpg" alt="Avatar preview" />
+                    <img id="avatarPreview" src="" alt="Avatar preview" hidden />
                     <span id="avatarHint" data-i18n="uploadAvatar">上传项目头像</span>
                   </label>
                   <div class="avatar-meta">
@@ -200,11 +200,11 @@
               <div class="form-grid">
                 <label class="field">
                   <span data-i18n="projectName">项目名称</span>
-                  <input id="tokenName" type="text" value="Meme Rocket" maxlength="32" />
+                  <input id="tokenName" type="text" value="" maxlength="32" />
                 </label>
                 <label class="field">
                   <span data-i18n="tokenSymbol">代币符号</span>
-                  <input id="tokenSymbol" type="text" value="MRKT" maxlength="12" />
+                  <input id="tokenSymbol" type="text" value="" maxlength="12" />
                 </label>
                 <label class="field">
                   <span data-i18n="launchPoolBnb">发射底池 BNB</span>
@@ -353,10 +353,10 @@
 
             <aside class="preview-panel">
               <div class="token-preview">
-                <img id="previewAvatar" class="preview-avatar" src="./assets/roo-avatar.jpg" alt="Project avatar preview" />
+                <img id="previewAvatar" class="preview-avatar" src="" alt="Project avatar preview" hidden />
                 <div>
-                  <h2 id="previewName">Meme Rocket</h2>
-                  <p id="previewSymbol">MRKT / BSC</p>
+                  <h2 id="previewName">未填写项目名称</h2>
+                  <p id="previewSymbol">未填写 / BSC</p>
                 </div>
               </div>
 
@@ -513,6 +513,29 @@
         <button type="button" data-drawer-tab="profile" data-i18n="drawerProfile">个人资料</button>
         <button type="button" data-drawer-tab="faq">FAQ</button>
       </aside>
+    </div>
+
+    <div id="devBuyModal" class="dev-buy-modal" hidden>
+      <div class="dev-buy-backdrop" data-close-dev-buy></div>
+      <section class="dev-buy-dialog" role="dialog" aria-modal="true" aria-label="Developer first buy">
+        <button class="dev-buy-close" type="button" data-close-dev-buy aria-label="关闭">×</button>
+        <h2 data-i18n="devBuyModalTitle">选择你想购买的代币数量</h2>
+        <p data-i18n="devBuyModalCopy">创建代币时必须进行 dev 首买，创建和买入会在同一笔链上交易中完成，避免第二笔交易被抢跑。另收 0.01 BNB 保护费进入平台钱包。</p>
+        <label class="dev-buy-toggle">
+          <span data-i18n="devBuySwitchLabel">以 BNB 买入</span>
+          <input id="devBuyModeSwitch" type="checkbox" checked disabled />
+          <i></i>
+        </label>
+        <label class="dev-buy-input">
+          <input id="devBuyBnbModal" type="number" min="0.000001" step="0.001" placeholder="购买金额" autocomplete="off" />
+          <strong>BNB</strong>
+        </label>
+        <button id="confirmDevBuy" class="primary-action action-wide" type="button" data-i18n="confirmDevBuy">确认买入！</button>
+        <div class="dev-buy-foot">
+          <span id="devBuyReceiveText">你将收到约 0 代币</span>
+          <span id="devBuyCostText">保护费：0.01 BNB</span>
+        </div>
+      </section>
     </div>
 
     <div id="tradeModal" class="trade-modal" hidden>

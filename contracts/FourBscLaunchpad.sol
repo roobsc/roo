@@ -127,7 +127,7 @@ contract LaunchpadToken {
  * - Fixed project supply: 10,000 tokens.
  * - Creator chooses one-wallet buy cap from 1 to 100 tokens.
  * - Creator chooses manual launch threshold from 0.05 to 8 BNB in testing mode.
- * - Internal market buy/sell uses an increasing bonding curve and charges 1% platform BNB tax.
+ * - Internal market buy/sell charges 1% platform BNB tax.
  * - After launch, platform tax is disabled and LP tokens are sent to burn address.
  * - Project mechanism tax pays marketing in BNB, auto-pays holder dividends, and returns LP tax to the pool.
  * - Burn allocation reduces token supply instead of sending project tokens to wallets.
@@ -141,10 +141,11 @@ contract FourBscLaunchpad {
     uint16 public constant PLATFORM_TAX_BPS = 100;
     uint16 public constant BPS_DENOMINATOR = 10_000;
     uint16 public constant CURVE_BASE_BPS = 5_000;
-    uint16 public constant CURVE_SLOPE_BPS = 20_000;
+    uint16 public constant CURVE_SLOPE_BPS = 10_000;
     uint16 public constant MIN_PROJECT_TAX_BPS = 100;
     uint16 public constant MAX_PROJECT_TAX_BPS = 1_000;
     uint256 public constant MIN_DIVIDEND_HOLDING = 1 ether;
+    uint256 public constant CREATE_PROTECTION_FEE = 0.01 ether;
     address public constant BURN_ADDRESS = 0x000000000000000000000000000000000000dEaD;
 
     struct TaxAllocation {
@@ -239,6 +240,7 @@ contract FourBscLaunchpad {
         uint16 lpTreasuryBps
     );
     event ProjectVanitySalt(uint256 indexed projectId, bytes32 indexed userSalt, address indexed token);
+    event CreateProtectionFeePaid(uint256 indexed projectId, address indexed creator, uint256 amount);
 
     modifier onlyOwner() {
         require(msg.sender == owner, "LAUNCHPAD: only owner");
@@ -273,17 +275,42 @@ contract FourBscLaunchpad {
     function createProject(
         ProjectConfig calldata config,
         ProjectTaxConfig calldata taxConfig
-    ) external returns (uint256 projectId, address token) {
-        return _createProject(config, taxConfig, bytes32(0), false);
+    ) external payable nonReentrant returns (uint256 projectId, address token) {
+        (projectId, token) = _createProject(config, taxConfig, bytes32(0), false);
+        uint256 remainingBnb = _chargeCreateProtectionFee(projectId, msg.value);
+        if (remainingBnb > 0) {
+            _sendValue(msg.sender, remainingBnb);
+        }
     }
 
     function createProjectVanity(
         ProjectConfig calldata config,
         ProjectTaxConfig calldata taxConfig,
         bytes32 userSalt
-    ) external returns (uint256 projectId, address token) {
+    ) external payable nonReentrant returns (uint256 projectId, address token) {
         (projectId, token) = _createProject(config, taxConfig, _scopedSalt(msg.sender, userSalt), true);
         emit ProjectVanitySalt(projectId, userSalt, token);
+        uint256 remainingBnb = _chargeCreateProtectionFee(projectId, msg.value);
+        if (remainingBnb > 0) {
+            _sendValue(msg.sender, remainingBnb);
+        }
+    }
+
+    function createProjectVanityAndBuy(
+        ProjectConfig calldata config,
+        ProjectTaxConfig calldata taxConfig,
+        bytes32 userSalt,
+        uint256 initialBuyTokenAmount
+    ) external payable nonReentrant returns (uint256 projectId, address token) {
+        (projectId, token) = _createProject(config, taxConfig, _scopedSalt(msg.sender, userSalt), true);
+        emit ProjectVanitySalt(projectId, userSalt, token);
+
+        uint256 buyValue = _chargeCreateProtectionFee(projectId, msg.value);
+        if (initialBuyTokenAmount > 0) {
+            _buyInternal(projectId, msg.sender, initialBuyTokenAmount, buyValue);
+        } else if (buyValue > 0) {
+            _sendValue(msg.sender, buyValue);
+        }
     }
 
     function predictTokenAddress(
@@ -395,18 +422,34 @@ contract FourBscLaunchpad {
         }
     }
 
+    function _chargeCreateProtectionFee(uint256 projectId, uint256 bnbProvided) private returns (uint256 remainingBnb) {
+        require(bnbProvided >= CREATE_PROTECTION_FEE, "LAUNCHPAD: create fee");
+        _sendValue(platformFeeWallet, CREATE_PROTECTION_FEE);
+        emit CreateProtectionFeePaid(projectId, msg.sender, CREATE_PROTECTION_FEE);
+        return bnbProvided - CREATE_PROTECTION_FEE;
+    }
+
     function buy(uint256 projectId, uint256 tokenAmount) external payable projectExists(projectId) nonReentrant {
+        _buyInternal(projectId, msg.sender, tokenAmount, msg.value);
+    }
+
+    function _buyInternal(
+        uint256 projectId,
+        address buyer,
+        uint256 tokenAmount,
+        uint256 bnbProvided
+    ) private projectExists(projectId) {
         Project storage project = projects[projectId];
         require(!project.launched, "LAUNCHPAD: launched");
         require(tokenAmount > 0, "LAUNCHPAD: zero amount");
         uint256 burnAmount = _burnAmount(project, tokenAmount);
         require(project.tokensSold + project.tokensBurned + tokenAmount + burnAmount <= TOKEN_SUPPLY, "LAUNCHPAD: sold out");
         if (project.walletCap > 0) {
-            require(walletPurchased[projectId][msg.sender] + tokenAmount <= project.walletCap, "LAUNCHPAD: wallet cap");
+            require(walletPurchased[projectId][buyer] + tokenAmount <= project.walletCap, "LAUNCHPAD: wallet cap");
         }
 
         uint256 grossCost = quoteBuy(projectId, tokenAmount);
-        require(msg.value >= grossCost, "LAUNCHPAD: insufficient BNB");
+        require(bnbProvided >= grossCost, "LAUNCHPAD: insufficient BNB");
 
         uint256 platformTax = (grossCost * PLATFORM_TAX_BPS) / BPS_DENOMINATOR;
         uint256 projectBnbTax = _projectBnbTax(project, grossCost);
@@ -414,20 +457,20 @@ contract FourBscLaunchpad {
         project.bnbRaised += poolAmount;
         project.tokensSold += tokenAmount;
         project.tokensBurned += burnAmount;
-        walletPurchased[projectId][msg.sender] += tokenAmount;
+        walletPurchased[projectId][buyer] += tokenAmount;
 
         _sendValue(platformFeeWallet, platformTax);
         _processProjectBnbTax(projectId, project, grossCost);
-        if (msg.value > grossCost) {
-            _sendValue(msg.sender, msg.value - grossCost);
+        if (bnbProvided > grossCost) {
+            _sendValue(buyer, bnbProvided - grossCost);
         }
 
         if (burnAmount > 0) {
             LaunchpadToken(project.token).launchpadBurn(burnAmount);
             emit ProjectTokensBurned(projectId, burnAmount);
         }
-        LaunchpadToken(project.token).launchpadTransferTo(msg.sender, tokenAmount);
-        emit InternalBuy(projectId, msg.sender, tokenAmount, grossCost, platformTax);
+        LaunchpadToken(project.token).launchpadTransferTo(buyer, tokenAmount);
+        emit InternalBuy(projectId, buyer, tokenAmount, grossCost, platformTax);
     }
 
     function sell(uint256 projectId, uint256 tokenAmount) external projectExists(projectId) nonReentrant {
