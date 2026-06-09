@@ -2847,13 +2847,21 @@ async function getBuySearchUpperBound(project, signerOrProvider, preferredMax = 
   return preferredMax < remaining ? preferredMax : remaining;
 }
 
-async function findExecutableBuyQuote(launchpad, projectId, desiredTokenAmount, slippageBps) {
+async function findExecutableBuyQuote(
+  launchpad,
+  projectId,
+  desiredTokenAmount,
+  { slippageBps = 0n, maxValue = null } = {}
+) {
   const quote = async (amount) => {
     if (amount <= 0n) {
       return null;
     }
     const cost = await launchpad.quoteBuy(projectId, amount);
-    const value = cost + ((cost * slippageBps) / 10000n);
+    const value = maxValue !== null ? maxValue : cost + ((cost * slippageBps) / 10000n);
+    if (value < cost) {
+      return null;
+    }
     await launchpad.buy.staticCall(projectId, amount, { value });
     return { tokenAmount: amount, cost, value };
   };
@@ -2926,7 +2934,14 @@ async function handleSwapSubmit() {
         tokenAmount = maxTokenAmount;
       }
       const slippageBps = BigInt(Math.round(Number(state.slippagePercent || 0) * 100));
-      const executable = await findExecutableBuyQuote(launchpad, buyProjectId, tokenAmount, slippageBps);
+      const executable = await findExecutableBuyQuote(
+        launchpad,
+        buyProjectId,
+        tokenAmount,
+        state.buyInputMode === "bnb"
+          ? { maxValue: bnbInputAmount }
+          : { slippageBps }
+      );
       if (!executable || executable.tokenAmount <= 0n) {
         throw new Error("这个项目内盘已卖完，不能继续买入。");
       }
@@ -2945,7 +2960,9 @@ async function handleSwapSubmit() {
       if (buyNotice.length) {
         $("#swapReceive").textContent = buyNotice.join(" ");
       }
-      const buyOverrides = { value: executable.value };
+      const buyOverrides = {
+        value: state.buyInputMode === "bnb" ? executable.cost : executable.value
+      };
       if (maxTokenAmount > 0n && tokenAmount >= maxTokenAmount) {
         buyOverrides.gasLimit = BigInt(config.finalBuyGasLimit || 6_500_000);
       }
