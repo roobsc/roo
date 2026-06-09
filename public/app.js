@@ -2036,9 +2036,9 @@ async function readInternalSaleRemaining(project, signerOrProvider) {
   try {
     const launchpad = getLaunchpadContract(signerOrProvider, launchpadAddress);
     const basics = await launchpad.getProjectBasics(BigInt(project.projectId));
-    const tokensSold = Number(ethers.formatEther(basics.tokensSold || 0n));
-    const remaining = Math.max(0, INTERNAL_SALE_SUPPLY - tokensSold);
-    return ethers.parseEther(String(remaining));
+    const internalSaleSupply = ethers.parseEther(String(INTERNAL_SALE_SUPPLY));
+    const tokensSold = BigInt(basics.tokensSold || 0n);
+    return tokensSold >= internalSaleSupply ? 0n : internalSaleSupply - tokensSold;
   } catch {
     const localRemaining = Math.max(0, INTERNAL_SALE_SUPPLY - Number(project.tokensSold || 0));
     return ethers.parseEther(String(localRemaining));
@@ -2112,6 +2112,9 @@ async function handleSwapSubmit() {
       } else {
         const bnbAmount = ethers.parseEther(String(rawAmount));
         tokenAmount = await estimateTokenAmountForBnb(launchpad, BigInt(tradeProject.projectId), bnbAmount, maxTokenAmount);
+        if (tokenAmount <= 0n && maxTokenAmount > 0n) {
+          tokenAmount = maxTokenAmount;
+        }
       }
       if (tokenAmount === undefined) {
         throw new Error("报价异常，无法计算买入数量。");
