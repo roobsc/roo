@@ -604,8 +604,7 @@ select {
 }
 
 .roo-console-copy,
-.roo-search-hub,
-.roo-console-stats {
+.roo-search-hub {
   position: relative;
   z-index: 1;
 }
@@ -742,52 +741,6 @@ select {
   color: #ffffff;
   background: var(--neon-gradient);
   box-shadow: 0 0 14px rgba(0, 240, 255, 0.32);
-}
-
-.roo-console-stats {
-  display: grid;
-  grid-column: 1 / -1;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.roo-console-stats div {
-  min-height: 82px;
-  padding: 18px;
-  border: 1px solid rgba(0, 240, 255, 0.2);
-  border-radius: var(--radius);
-  background: linear-gradient(135deg, #11131a, #0e1017);
-  backdrop-filter: blur(18px);
-  box-shadow:
-    0 8px 20px rgba(0, 0, 0, 0.4),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
-}
-
-.roo-console-stats div:hover {
-  border-color: rgba(0, 240, 255, 0.6);
-  box-shadow: 0 0 24px rgba(0, 240, 255, 0.16), 0 8px 20px rgba(0, 0, 0, 0.44);
-}
-
-.roo-console-stats span,
-.roo-console-stats strong {
-  display: block;
-}
-
-.roo-console-stats span {
-  color: var(--text-accent);
-  font-size: 12px;
-  font-weight: 850;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-.roo-console-stats strong {
-  margin-top: 9px;
-  color: var(--text-accent);
-  text-shadow: 0 0 16px rgba(0, 240, 255, 0.28);
-  font-size: 36px;
-  font-weight: 800;
-  line-height: 1;
 }
 
 .market-toolbar {
@@ -1236,8 +1189,8 @@ select {
 
 .project-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-  gap: 24px;
+  grid-template-columns: repeat(auto-fill, minmax(315px, 1fr));
+  gap: 16px;
   width: 100%;
   align-items: stretch;
 }
@@ -1299,11 +1252,11 @@ select {
 
 .project-card {
   display: grid;
-  grid-template-columns: 134px minmax(0, 1fr);
-  gap: 18px;
-  min-height: 166px;
+  grid-template-columns: 108px minmax(0, 1fr);
+  gap: 14px;
+  min-height: 142px;
   align-items: center;
-  padding: 18px;
+  padding: 12px;
   position: relative;
   overflow: hidden;
   backdrop-filter: blur(10px);
@@ -1328,7 +1281,7 @@ select {
 .project-card::after {
   content: "";
   position: absolute;
-  inset: 10px;
+  inset: 8px;
   border: 1px solid rgba(0, 240, 255, 0.06);
   border-radius: 16px;
   pointer-events: none;
@@ -1337,10 +1290,10 @@ select {
 .project-card::before {
   content: "";
   position: absolute;
-  right: -42px;
-  top: -42px;
-  width: 132px;
-  height: 132px;
+  right: -48px;
+  top: -48px;
+  width: 120px;
+  height: 120px;
   border-radius: 50%;
   background: radial-gradient(circle, rgba(0, 240, 255, 0.18), transparent 68%);
   pointer-events: none;
@@ -1351,11 +1304,11 @@ select {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 134px;
-  height: 134px;
+  width: 108px;
+  height: 108px;
   aspect-ratio: 1;
   overflow: hidden;
-  border-radius: 16px;
+  border-radius: 14px;
   background:
     linear-gradient(90deg, rgba(0, 240, 255, 0.08) 1px, transparent 1px) 0 0 / 22px 22px,
     linear-gradient(0deg, rgba(177, 0, 255, 0.07) 1px, transparent 1px) 0 0 / 22px 22px,
@@ -1372,15 +1325,15 @@ select {
 .project-thumb span {
   display: grid;
   place-items: center;
-  width: 84px;
-  height: 92px;
+  width: 66px;
+  height: 74px;
   border: 3px solid rgba(0, 240, 255, 0.58);
   border-radius: 52% 52% 48% 48% / 60% 60% 42% 42%;
   background:
     radial-gradient(circle at 32% 20%, rgba(255, 255, 255, 0.6), transparent 17%),
     linear-gradient(145deg, #00f0ff, #33106a 72%);
   color: #ffffff;
-  font-size: 31px;
+  font-size: 25px;
   font-weight: 950;
   text-shadow: 0 2px 0 rgba(0, 0, 0, 0.28);
   box-shadow: 0 18px 38px rgba(0, 0, 0, 0.35);
@@ -1396,10 +1349,10 @@ select {
 
 .project-thumb button {
   position: absolute;
-  top: 10px;
-  right: 10px;
-  width: 30px;
-  height: 30px;
+  top: 8px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
   border: 0;
   border-radius: 999px;
   color: var(--text-accent);
@@ -1410,7 +1363,7 @@ select {
   min-width: 0;
   display: grid;
   align-content: space-between;
-  gap: 8px;
+  gap: 7px;
 }
 
 .project-title-row {
@@ -1425,7 +1378,7 @@ select {
   margin: 0;
   overflow-wrap: anywhere;
   color: var(--text-primary);
-  font-size: 20px;
+  font-size: 17px;
   line-height: 1.05;
 }
 
@@ -1433,14 +1386,14 @@ select {
   color: #ffffff;
   background: var(--neon-gradient);
   border-radius: 3px;
-  padding: 4px 8px;
-  font-size: 12px;
+  padding: 3px 7px;
+  font-size: 11px;
   font-weight: 900;
 }
 
 .token-kind {
   display: inline-block;
-  margin-top: 6px;
+  margin-top: 4px;
   color: var(--text-tertiary);
   font-size: 12px;
   font-weight: 900;
@@ -1449,7 +1402,7 @@ select {
 .change-badge {
   align-self: start;
   min-width: max-content;
-  padding: 5px 7px;
+  padding: 4px 7px;
   border-radius: 999px;
   color: var(--green);
   background: rgba(0, 240, 255, 0.12);
@@ -1459,15 +1412,15 @@ select {
 .project-facts {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: 6px;
   margin: 0;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .project-facts div {
   display: grid;
-  gap: 4px;
-  padding: 9px;
+  gap: 3px;
+  padding: 7px;
   border: 1px solid rgba(0, 240, 255, 0.1);
   border-radius: 12px;
   background: rgba(0, 0, 0, 0.18);
@@ -1492,7 +1445,7 @@ select {
 .project-progress-line {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 52px;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
   color: var(--text-accent);
   font-size: 12px;
@@ -1504,7 +1457,7 @@ select {
   grid-column: 1;
   grid-row: 1;
   z-index: 1;
-  height: 12px;
+  height: 9px;
   width: var(--value);
   min-width: 8px;
   border-radius: 999px;
@@ -1516,7 +1469,7 @@ select {
   content: "";
   grid-column: 1;
   grid-row: 1;
-  height: 12px;
+  height: 9px;
   border: 1px solid rgba(0, 240, 255, 0.08);
   border-radius: 999px;
   background: #2a2f3f;
@@ -1534,10 +1487,40 @@ select {
   align-items: center;
   gap: 10px;
   color: var(--text-tertiary);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 800;
-  padding-top: 10px;
+  padding-top: 7px;
   border-top: 1px solid rgba(0, 240, 255, 0.1);
+}
+
+.market-pagination {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0 4px;
+}
+
+.market-pagination button {
+  min-width: 86px;
+  min-height: 38px;
+  border: 1px solid rgba(0, 240, 255, 0.2);
+  border-radius: 999px;
+  color: var(--text-primary);
+  background: rgba(17, 19, 26, 0.78);
+  font-weight: 900;
+}
+
+.market-pagination button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.market-pagination span {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 900;
 }
 
 .empty-market {
@@ -3232,8 +3215,7 @@ select {
 
   .metric-row,
   .project-list,
-  .market-search,
-  .roo-console-stats {
+  .market-search {
     grid-template-columns: 1fr;
   }
 
@@ -3304,8 +3286,104 @@ select {
   }
 
   .project-card {
-    grid-template-columns: 1fr;
-    min-height: 0;
+    grid-template-columns: 92px minmax(0, 1fr);
+    gap: 12px;
+    min-height: 138px;
+    padding: 12px;
+    border-radius: 18px;
+    align-items: stretch;
+  }
+
+  .project-card::after {
+    inset: 6px;
+    border-radius: 14px;
+  }
+
+  .project-card::before {
+    width: 92px;
+    height: 92px;
+    right: -34px;
+    top: -34px;
+  }
+
+  .project-thumb {
+    width: 92px;
+    height: 92px;
+    align-self: start;
+    border-radius: 12px;
+  }
+
+  .project-thumb span {
+    width: 58px;
+    height: 64px;
+    font-size: 22px;
+  }
+
+  .project-thumb button {
+    width: 24px;
+    height: 24px;
+    top: 6px;
+    right: 6px;
+  }
+
+  .project-title-row {
+    gap: 8px;
+  }
+
+  .project-title-row h3 {
+    font-size: 17px;
+    line-height: 1.15;
+  }
+
+  .token-kind {
+    margin-top: 3px;
+    font-size: 11px;
+  }
+
+  .change-badge {
+    font-size: 10px;
+    padding: 4px 7px;
+  }
+
+  .project-facts {
+    grid-template-columns: 1fr 1fr;
+    gap: 5px;
+    font-size: 10px;
+  }
+
+  .project-facts div {
+    padding: 6px;
+    border-radius: 10px;
+  }
+
+  .project-facts dt {
+    display: none;
+  }
+
+  .project-progress-line {
+    grid-template-columns: minmax(0, 1fr) 46px;
+    gap: 7px;
+    font-size: 11px;
+  }
+
+  .project-progress-line i,
+  .project-progress-line::before {
+    height: 8px;
+  }
+
+  .project-card-footer {
+    padding-top: 6px;
+    font-size: 10px;
+  }
+
+  .market-pagination {
+    padding-bottom: 12px;
+  }
+
+  .market-pagination button {
+    min-width: 78px;
+    min-height: 34px;
+    font-size: 12px;
   }
 
   .create-frame {

@@ -352,6 +352,7 @@ const state = {
   hardCapFilter: "all",
   marketSort: "default",
   marketLoading: false,
+  marketPage: 1,
   language: "zh",
   listedOnly: false,
   selectedProject: null,
@@ -1058,6 +1059,10 @@ function renderProjects() {
     return;
   }
   const visibleProjects = getVisibleProjects();
+  const pageSize = window.matchMedia("(max-width: 760px)").matches ? 6 : 9;
+  const totalPages = Math.max(1, Math.ceil(visibleProjects.length / pageSize));
+  state.marketPage = Math.min(Math.max(1, Number(state.marketPage || 1)), totalPages);
+  const pageProjects = visibleProjects.slice((state.marketPage - 1) * pageSize, state.marketPage * pageSize);
   if (visibleProjects.length === 0) {
     list.innerHTML = `
       <div class="empty-market empty-market-rich">
@@ -1072,7 +1077,8 @@ function renderProjects() {
     `;
     return;
   }
-  list.innerHTML = visibleProjects.map((project) => `
+  list.innerHTML = `
+    ${pageProjects.map((project) => `
     <article class="project-card" data-project-symbol="${project.symbol}">
       <div class="project-thumb">
         ${getProjectAvatarMarkup(project)}
@@ -1118,7 +1124,15 @@ function renderProjects() {
         </div>
       </div>
     </article>
-  `).join("");
+    `).join("")}
+    ${totalPages > 1 ? `
+      <nav class="market-pagination" aria-label="Project pages">
+        <button type="button" data-page-action="prev" ${state.marketPage <= 1 ? "disabled" : ""}>${t("previousPage")}</button>
+        <span>${state.marketPage} / ${totalPages}</span>
+        <button type="button" data-page-action="next" ${state.marketPage >= totalPages ? "disabled" : ""}>${t("nextPage")}</button>
+      </nav>
+    ` : ""}
+  `;
 }
 
 function renderProfileList(selector, items, emptyText) {
@@ -1203,6 +1217,8 @@ const translations = {
     devBuyReceiveText: "你将收到约 {amount} {symbol}",
     devBuyThresholdWarning: "提醒：当前金额已达到或超过发射阈值 {threshold}，确认后可能一笔打满并触发发射。",
     devBuyCreatingStatus: "正在创建...",
+    previousPage: "上一页",
+    nextPage: "下一页",
     launchThresholdTitle: "发射阈值",
     projectTax: "项目税收",
     enableTax: "启用税收",
@@ -1367,6 +1383,8 @@ const translations = {
     devBuyReceiveText: "You will receive about {amount} {symbol}",
     devBuyThresholdWarning: "Heads up: this amount reaches or exceeds the launch threshold {threshold}; confirming may fill the pool and trigger launch.",
     devBuyCreatingStatus: "Creating...",
+    previousPage: "Previous",
+    nextPage: "Next",
     launchThresholdTitle: "Launch threshold",
     projectTax: "Project tax",
     enableTax: "Enable tax",
@@ -3165,6 +3183,7 @@ function bindEvents() {
   $$("#marketFilters [data-market-filter]").forEach((button) => {
     button.addEventListener("click", () => {
       state.marketFilter = button.dataset.marketFilter;
+      state.marketPage = 1;
       $$("#marketFilters [data-market-filter]").forEach((filterButton) => {
         filterButton.classList.toggle("active", filterButton === button);
       });
@@ -3174,6 +3193,7 @@ function bindEvents() {
 
   $("#marketCapSortButton").addEventListener("click", () => {
     state.marketSort = "marketCap";
+    state.marketPage = 1;
     $("#marketSortSelect").value = "marketCap";
     renderProjects();
   });
@@ -3194,27 +3214,32 @@ function bindEvents() {
 
   $("#hardCapFilter").addEventListener("change", (event) => {
     state.hardCapFilter = event.target.value;
+    state.marketPage = 1;
     renderProjects();
   });
 
   $("#marketSortSelect").addEventListener("change", (event) => {
     state.marketSort = event.target.value;
+    state.marketPage = 1;
     renderProjects();
   });
 
   $("#listedOnly").addEventListener("change", (event) => {
     state.listedOnly = event.target.checked;
+    state.marketPage = 1;
     renderProjects();
   });
 
   $("#marketSearch").addEventListener("input", (event) => {
     state.marketSearch = event.target.value;
+    state.marketPage = 1;
     renderProjects();
   });
 
   $("#marketSearchForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     state.marketSearch = $("#marketSearch").value;
+    state.marketPage = 1;
     const value = state.marketSearch.trim();
     if (window.ethers && ethers.isAddress(value)) {
       const searchButton = $("#marketSearchForm button");
@@ -3258,6 +3283,13 @@ function bindEvents() {
       });
       return;
     }
+    const pageButton = event.target.closest("[data-page-action]");
+    if (pageButton) {
+      state.marketPage += pageButton.dataset.pageAction === "next" ? 1 : -1;
+      renderProjects();
+      $("#projectList").scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
     if (event.target.closest("[data-open-create]")) {
       updateTabs("create");
       return;
@@ -3273,6 +3305,12 @@ function bindEvents() {
     if (project) {
       openTradeModal(project);
     }
+  });
+
+  let resizeTimer = null;
+  window.addEventListener("resize", () => {
+    window.clearTimeout(resizeTimer);
+    resizeTimer = window.setTimeout(renderProjects, 120);
   });
 
   $$(".profile-list").forEach((list) => {
