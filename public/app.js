@@ -376,6 +376,7 @@ let projects = [];
 let tradeChartApi = null;
 let tradeCandleSeries = null;
 let tradeVolumeSeries = null;
+let tradeLineSeries = null;
 let tradeChartResizeObserver = null;
 const projectLaunchpadCache = new Map();
 
@@ -1571,7 +1572,8 @@ function normalizeChartCandles(rawCandles = [], fallbackPrice = 0) {
       high: Number(candle.high || 0),
       low: Number(candle.low || 0),
       close: Number(candle.close || 0),
-      volume: Number(candle.volume || 0)
+      volume: Number(candle.volume || 0),
+      side: String(candle.side || candle.lastSide || "").toLowerCase()
     }))
     .filter((candle) => candle.close > 0)
     .sort((a, b) => a.time - b.time);
@@ -1623,9 +1625,9 @@ function ensureTradeChart(container) {
   if (!window.LightweightCharts || !container) {
     return null;
   }
-  const { createChart, CandlestickSeries, HistogramSeries, CrosshairMode } = window.LightweightCharts;
-  if (tradeChartApi && tradeCandleSeries && tradeVolumeSeries) {
-    return { chart: tradeChartApi, candleSeries: tradeCandleSeries, volumeSeries: tradeVolumeSeries };
+  const { createChart, CandlestickSeries, HistogramSeries, LineSeries, CrosshairMode } = window.LightweightCharts;
+  if (tradeChartApi && tradeCandleSeries && tradeVolumeSeries && tradeLineSeries) {
+    return { chart: tradeChartApi, candleSeries: tradeCandleSeries, volumeSeries: tradeVolumeSeries, lineSeries: tradeLineSeries };
   }
 
   tradeChartApi = createChart(container, {
@@ -1689,6 +1691,18 @@ function ensureTradeChart(container) {
     scaleMargins: { top: 0.82, bottom: 0 },
     borderVisible: false
   });
+  tradeLineSeries = tradeChartApi.addSeries(LineSeries, {
+    color: "rgba(0, 240, 255, 0.78)",
+    lineWidth: 2,
+    priceLineVisible: false,
+    lastValueVisible: false,
+    crosshairMarkerVisible: false,
+    priceFormat: {
+      type: "price",
+      precision: 10,
+      minMove: 0.0000000001
+    }
+  });
 
   if (window.ResizeObserver) {
     tradeChartResizeObserver = new ResizeObserver(() => {
@@ -1699,7 +1713,7 @@ function ensureTradeChart(container) {
     tradeChartResizeObserver.observe(container);
   }
 
-  return { chart: tradeChartApi, candleSeries: tradeCandleSeries, volumeSeries: tradeVolumeSeries };
+  return { chart: tradeChartApi, candleSeries: tradeCandleSeries, volumeSeries: tradeVolumeSeries, lineSeries: tradeLineSeries };
 }
 
 function drawTradeChart(project = {}, backendCandles = null) {
@@ -1718,23 +1732,37 @@ function drawTradeChart(project = {}, backendCandles = null) {
   }
 
   const visibleCandles = compactSparseChartTimes(candles);
-  const data = visibleCandles.map((candle) => ({
-    time: toChartTimestamp(candle.time),
-    open: Number(candle.open),
-    high: Number(candle.high),
-    low: Number(candle.low),
-    close: Number(candle.close)
-  }));
+  const data = visibleCandles.map((candle) => {
+    const isSell = candle.side === "sell" || (candle.side !== "buy" && candle.close < candle.open);
+    const color = isSell ? "#ff3b30" : "#37ff14";
+    return {
+      time: toChartTimestamp(candle.time),
+      open: Number(candle.open),
+      high: Number(candle.high),
+      low: Number(candle.low),
+      close: Number(candle.close),
+      color,
+      borderColor: color,
+      wickColor: color
+    };
+  });
   const volumeData = visibleCandles.map((candle) => ({
     time: toChartTimestamp(candle.time),
     value: Number(candle.volume || 0),
-    color: candle.close >= candle.open ? "rgba(55, 255, 20, 0.34)" : "rgba(255, 59, 48, 0.34)"
+    color: (candle.side === "sell" || (candle.side !== "buy" && candle.close < candle.open))
+      ? "rgba(255, 59, 48, 0.38)"
+      : "rgba(55, 255, 20, 0.34)"
+  }));
+  const lineData = visibleCandles.map((candle) => ({
+    time: toChartTimestamp(candle.time),
+    value: Number(candle.close)
   }));
   const last = candles[candles.length - 1].close;
   const lastCandle = candles[candles.length - 1];
-  const trendColor = lastCandle.close >= lastCandle.open ? "#37ff14" : "#ff3b30";
+  const trendColor = lastCandle.side === "sell" || (lastCandle.side !== "buy" && lastCandle.close < lastCandle.open) ? "#ff3b30" : "#37ff14";
 
   chart.candleSeries.setData(data);
+  chart.lineSeries.setData(lineData);
   chart.volumeSeries.setData(volumeData);
   chart.chart.timeScale().applyOptions({
     rightOffset: candles.length <= 12 ? 10 : 6,
@@ -1793,11 +1821,13 @@ function buildCandlesFromTrades(trades, bucketMs = 60_000) {
       high: price,
       low: price,
       close: price,
-      volume: 0
+      volume: 0,
+      side: String(trade.side || "").toLowerCase()
     };
     candle.high = Math.max(candle.high, price);
     candle.low = Math.min(candle.low, price);
     candle.close = price;
+    candle.side = String(trade.side || candle.side || "").toLowerCase();
     candle.volume += Number(trade.bnbAmount || 0);
     buckets.set(bucket, candle);
   });

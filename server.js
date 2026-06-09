@@ -264,7 +264,8 @@ async function getCandlesStore(projectId, interval, token = "") {
         floor(timestamp_ms / ${bucketMs}) * ${bucketMs} as bucket,
         timestamp_ms,
         price_bnb::float8 as price,
-        bnb_amount::float8 as volume
+        bnb_amount::float8 as volume,
+        side
       from trades
       where lower(token) = ${normalizedToken}
         and price_bnb > 0
@@ -282,7 +283,8 @@ async function getCandlesStore(projectId, interval, token = "") {
       max(price)::float8 as high,
       min(price)::float8 as low,
       (array_agg(price order by timestamp_ms desc))[1]::float8 as close,
-      sum(volume)::float8 as volume
+      sum(volume)::float8 as volume,
+      (array_agg(side order by timestamp_ms desc))[1] as side
     from ranked
     group by bucket
     order by bucket asc
@@ -293,7 +295,8 @@ async function getCandlesStore(projectId, interval, token = "") {
         floor(timestamp_ms / ${bucketMs}) * ${bucketMs} as bucket,
         timestamp_ms,
         price_bnb::float8 as price,
-        bnb_amount::float8 as volume
+        bnb_amount::float8 as volume,
+        side
       from trades
       where project_id = ${String(projectId || "")}
         and price_bnb > 0
@@ -311,7 +314,8 @@ async function getCandlesStore(projectId, interval, token = "") {
       max(price)::float8 as high,
       min(price)::float8 as low,
       (array_agg(price order by timestamp_ms desc))[1]::float8 as close,
-      sum(volume)::float8 as volume
+      sum(volume)::float8 as volume,
+      (array_agg(side order by timestamp_ms desc))[1] as side
     from ranked
     group by bucket
     order by bucket asc
@@ -323,7 +327,8 @@ async function getCandlesStore(projectId, interval, token = "") {
     high: Number(row.high),
     low: Number(row.low),
     close: Number(row.close),
-    volume: Number(row.volume || 0)
+    volume: Number(row.volume || 0),
+    side: String(row.side || "").toLowerCase()
   }));
 }
 
@@ -466,11 +471,13 @@ function buildCandles(trades, interval) {
       high: price,
       low: price,
       close: price,
-      volume: 0
+      volume: 0,
+      side: String(trade.side || "").toLowerCase()
     };
     candle.high = Math.max(candle.high, price);
     candle.low = Math.min(candle.low, price);
     candle.close = price;
+    candle.side = String(trade.side || candle.side || "").toLowerCase();
     candle.volume += volume;
     buckets.set(bucket, candle);
   });
