@@ -2136,9 +2136,16 @@ async function estimateTokenAmountForBnb(launchpad, projectId, maxBnbAmount, max
   if (maxBnbAmount <= 0n) {
     return 0n;
   }
+  if (maxTokenAmount <= 0n) {
+    return 0n;
+  }
+  const maxCost = await launchpad.quoteBuy(projectId, maxTokenAmount);
+  if (maxCost <= maxBnbAmount) {
+    return maxTokenAmount;
+  }
   let low = 0n;
   let high = maxTokenAmount;
-  for (let i = 0; i < 24; i += 1) {
+  for (let i = 0; i < 80 && low < high; i += 1) {
     const mid = (low + high + 1n) / 2n;
     const cost = await launchpad.quoteBuy(projectId, mid);
     if (cost <= maxBnbAmount) {

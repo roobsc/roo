@@ -135,7 +135,7 @@ contract LaunchpadToken {
 contract FourBscLaunchpad {
     uint256 public constant TOKEN_SUPPLY = 10_000 ether;
     uint256 public constant INTERNAL_SALE_SUPPLY = 8_000 ether;
-    uint256 public constant LAUNCH_SOLD_FLOOR = 7_999.9 ether;
+    uint256 public constant LAUNCH_SOLD_FLOOR = 7_999 ether;
     uint256 public constant MIN_WALLET_CAP = 1 ether;
     uint256 public constant MAX_WALLET_CAP = 100 ether;
     uint256 public constant MIN_LAUNCH_THRESHOLD = 0.05 ether;
