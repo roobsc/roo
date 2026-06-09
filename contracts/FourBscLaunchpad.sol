@@ -135,10 +135,12 @@ contract LaunchpadToken {
 contract FourBscLaunchpad {
     uint256 public constant TOKEN_SUPPLY = 10_000 ether;
     uint256 public constant INTERNAL_SALE_SUPPLY = 8_000 ether;
+    uint256 public constant LAUNCH_SOLD_FLOOR = 7_999.9 ether;
     uint256 public constant MIN_WALLET_CAP = 1 ether;
     uint256 public constant MAX_WALLET_CAP = 100 ether;
     uint256 public constant MIN_LAUNCH_THRESHOLD = 0.05 ether;
     uint256 public constant MAX_LAUNCH_THRESHOLD = 8 ether;
+    uint16 public constant LAUNCH_SHORTFALL_BPS = 1;
     uint16 public constant PLATFORM_TAX_BPS = 100;
     uint16 public constant BPS_DENOMINATOR = 10_000;
     uint16 public constant CURVE_BASE_BPS = 5_000;
@@ -475,7 +477,7 @@ contract FourBscLaunchpad {
         LaunchpadToken(project.token).launchpadTransferTo(buyer, tokenAmount);
         emit InternalBuy(projectId, buyer, tokenAmount, grossCost, platformTax);
 
-        if (project.bnbRaised >= project.launchThreshold) {
+        if (_isLaunchReady(project)) {
             _tryLaunchToPancake(projectId, project, false);
         }
     }
@@ -509,7 +511,7 @@ contract FourBscLaunchpad {
         Project storage project = projects[projectId];
         require(msg.sender == project.creator || msg.sender == owner, "LAUNCHPAD: only creator");
         require(!project.launched, "LAUNCHPAD: already launched");
-        require(project.bnbRaised >= project.launchThreshold, "LAUNCHPAD: threshold not met");
+        require(_isLaunchReady(project), "LAUNCHPAD: threshold not met");
 
         bool launched = _tryLaunchToPancake(projectId, project, true);
         require(launched, "LAUNCHPAD: pancake launch failed");
@@ -577,7 +579,7 @@ contract FourBscLaunchpad {
         require(receiver != address(0), "LAUNCHPAD: zero receiver");
         Project storage project = projects[projectId];
         require(!project.launched, "LAUNCHPAD: already launched");
-        require(project.bnbRaised >= project.launchThreshold, "LAUNCHPAD: threshold not met");
+        require(_isLaunchReady(project), "LAUNCHPAD: threshold not met");
 
         uint256 tokenAmount = LaunchpadToken(project.token).balanceOf(address(this));
         uint256 bnbAmount = project.bnbRaised;
@@ -637,6 +639,17 @@ contract FourBscLaunchpad {
         Project storage project = projects[projectId];
         require(tokenAmount <= project.tokensSold, "LAUNCHPAD: sell amount");
         return _curvePoolAmount(project.launchThreshold, project.tokensSold - tokenAmount, tokenAmount);
+    }
+
+    function _isLaunchReady(Project storage project) private view returns (bool) {
+        if (project.bnbRaised >= project.launchThreshold) {
+            return true;
+        }
+        if (project.tokensSold < LAUNCH_SOLD_FLOOR) {
+            return false;
+        }
+        uint256 allowedShortfall = (project.launchThreshold * LAUNCH_SHORTFALL_BPS) / BPS_DENOMINATOR;
+        return project.launchThreshold - project.bnbRaised <= allowedShortfall;
     }
 
     function _curvePoolAmount(

@@ -729,6 +729,38 @@ async function buildProjectFromChain(projectId, basics, provider, launchpadContr
   };
 }
 
+async function refreshProjectFromChain(project, signerOrProvider) {
+  if (
+    !project
+    || project.projectId === undefined
+    || project.projectId === null
+    || !window.ethers
+    || !ethers.isAddress(project.contract || "")
+  ) {
+    return project;
+  }
+  const tradeProject = await ensureProjectLaunchpad(project, signerOrProvider);
+  const launchpadAddress = getProjectLaunchpadAddress(tradeProject);
+  const launchpad = getLaunchpadContract(signerOrProvider, launchpadAddress);
+  const basics = await launchpad.getProjectBasics(BigInt(tradeProject.projectId));
+  if (normalizeAddress(basics.token) !== normalizeAddress(tradeProject.contract)) {
+    return tradeProject;
+  }
+  const chainProject = await buildProjectFromChain(
+    tradeProject.projectId,
+    basics,
+    signerOrProvider,
+    launchpad,
+    launchpadAddress
+  );
+  return upsertLocalProject({
+    ...tradeProject,
+    ...chainProject,
+    avatarUrl: tradeProject.avatarUrl || chainProject.avatarUrl,
+    metadata: tradeProject.metadata || chainProject.metadata
+  });
+}
+
 async function syncChainProjects(limit = 120) {
   if (state.chainSyncing || !window.ethers || !hasConfiguredAddress(config.launchpadAddress)) {
     return;
@@ -837,6 +869,7 @@ function setCreateStatus(message, mode = "") {
   status.textContent = message;
   status.classList.toggle("success", mode === "success");
   status.classList.toggle("error", mode === "error");
+  status.classList.toggle("warning", mode === "warning");
 }
 
 function formatMarketCap(value) {
@@ -1168,6 +1201,8 @@ const translations = {
     devBuySwitchLabel: "以 BNB 买入",
     confirmDevBuy: "确认买入！",
     devBuyReceiveText: "你将收到约 {amount} {symbol}",
+    devBuyThresholdWarning: "提醒：当前金额已达到或超过发射阈值 {threshold}，确认后可能一笔打满并触发发射。",
+    devBuyCreatingStatus: "正在创建...",
     launchThresholdTitle: "发射阈值",
     projectTax: "项目税收",
     enableTax: "启用税收",
@@ -1330,6 +1365,8 @@ const translations = {
     devBuySwitchLabel: "Buy with BNB",
     confirmDevBuy: "Confirm Buy!",
     devBuyReceiveText: "You will receive about {amount} {symbol}",
+    devBuyThresholdWarning: "Heads up: this amount reaches or exceeds the launch threshold {threshold}; confirming may fill the pool and trigger launch.",
+    devBuyCreatingStatus: "Creating...",
     launchThresholdTitle: "Launch threshold",
     projectTax: "Project tax",
     enableTax: "Enable tax",
@@ -2151,12 +2188,14 @@ async function handleSwapSubmit() {
     if (state.swapSide === "buy") {
       const capMaxTokenAmount = ethers.parseEther(String(isWalletCapEnabled(tradeProject) ? tradeProject.cap : INTERNAL_SALE_SUPPLY));
       const maxTokenAmount = await getBuySearchUpperBound(tradeProject, signer, capMaxTokenAmount);
+      const buyProjectId = BigInt(tradeProject.projectId);
+      const bnbInputAmount = state.buyInputMode === "bnb" ? ethers.parseEther(String(rawAmount)) : 0n;
       let tokenAmount;
       if (state.buyInputMode === "token") {
         tokenAmount = ethers.parseEther(String(rawAmount));
       } else {
         const bnbAmount = ethers.parseEther(String(rawAmount));
-        tokenAmount = await estimateTokenAmountForBnb(launchpad, BigInt(tradeProject.projectId), bnbAmount, maxTokenAmount);
+        tokenAmount = await estimateTokenAmountForBnb(launchpad, buyProjectId, bnbAmount, maxTokenAmount);
         if (tokenAmount <= 0n && maxTokenAmount > 0n) {
           tokenAmount = maxTokenAmount;
         }
@@ -2171,7 +2210,7 @@ async function handleSwapSubmit() {
         tokenAmount = maxTokenAmount;
       }
       const slippageBps = BigInt(Math.round(Number(state.slippagePercent || 0) * 100));
-      const executable = await findExecutableBuyQuote(launchpad, BigInt(tradeProject.projectId), tokenAmount, slippageBps);
+      const executable = await findExecutableBuyQuote(launchpad, buyProjectId, tokenAmount, slippageBps);
       if (!executable || executable.tokenAmount <= 0n) {
         throw new Error("这个项目内盘已卖完，不能继续买入。");
       }
@@ -2180,7 +2219,17 @@ async function handleSwapSubmit() {
       }
       tokenAmount = executable.tokenAmount;
       const cost = executable.cost;
-      const tx = await launchpad.buy(BigInt(tradeProject.projectId), tokenAmount, { value: executable.value });
+      const buyNotice = [];
+      if (state.buyInputMode === "bnb" && bnbInputAmount > cost) {
+        buyNotice.push(`输入金额超过当前可成交额度，本次预计只扣除 ${Number(ethers.formatEther(cost)).toFixed(6)} BNB，买入 ${Number(ethers.formatEther(tokenAmount)).toFixed(6)} ${project.symbol}。`);
+      }
+      if (maxTokenAmount > 0n && tokenAmount >= maxTokenAmount) {
+        buyNotice.push("这笔买入会买完当前可买代币，确认后将尝试自动发射到 Pancake Swap。");
+      }
+      if (buyNotice.length) {
+        $("#swapReceive").textContent = buyNotice.join(" ");
+      }
+      const tx = await launchpad.buy(buyProjectId, tokenAmount, { value: executable.value });
       $("#swapReceive").textContent = `购买交易已提交：${tx.hash}`;
       await tx.wait();
       await saveBackendTrade(tradeProject, {
@@ -2406,6 +2455,39 @@ async function refreshTradeData(project) {
   }
 }
 
+async function refreshOpenTradeProjectFromChain(project) {
+  if (!project || !window.ethers || project.projectId === undefined || project.projectId === null) {
+    return;
+  }
+  try {
+    const provider = window.ethereum
+      ? new ethers.BrowserProvider(window.ethereum)
+      : new ethers.JsonRpcProvider(config.rpcUrl || "https://bsc-dataseed.binance.org");
+    const freshProject = await refreshProjectFromChain(project, provider);
+    if (
+      !freshProject
+      || $("#tradeModal").hidden
+      || normalizeAddress(freshProject.contract || "") !== normalizeAddress(state.selectedProject && state.selectedProject.contract || "")
+    ) {
+      return;
+    }
+    state.selectedProject = freshProject;
+    $("#tradeCreator").textContent = `${t("creatorLabelFull")} ${freshProject.creator}`;
+    $("#tradeChange").textContent = `+${freshProject.change}%`;
+    $("#bondingValue").textContent = `${freshProject.progress}%`;
+    $("#bondingBar").style.width = `${Math.min(100, Number(freshProject.progress || 0))}%`;
+    $("#infoDescription").textContent = freshProject.listed
+      ? t("tradeListedDescription")
+      : t("tradeInternalDescription");
+    updateTradeStats(freshProject, []);
+    updateBuyCapQuote(freshProject);
+    estimateSwapReceive();
+    refreshTradeData(freshProject);
+  } catch {
+    // Keep the cached project visible if the RPC read fails.
+  }
+}
+
 function openTradeModal(project) {
   state.selectedProject = project;
   state.buyInputMode = "token";
@@ -2438,6 +2520,7 @@ function openTradeModal(project) {
   setSwapSide("buy");
   $("#tradeModal").hidden = false;
   document.body.classList.add("modal-open");
+  refreshOpenTradeProjectFromChain(project);
 }
 
 function closeTradeModal() {
@@ -2832,11 +2915,16 @@ function updateDevBuyModalQuote() {
   const params = state.pendingCreateParams || buildCreateParams(state.wallet);
   const amount = Math.max(0, Number($("#devBuyBnbModal").value || 0));
   const tokens = estimateInitialBuyTokens(amount, params);
+  const threshold = Number(params.launchThresholdBnb || state.threshold || 0);
   state.devBuyBnb = amount;
   state.devBuyTokens = tokens;
-  $("#devBuyReceiveText").textContent = t("devBuyReceiveText")
+  let message = t("devBuyReceiveText")
     .replace("{amount}", formatTokenAmount(tokens, 6))
     .replace("{symbol}", params.symbol || t("tokenUnit"));
+  if (threshold > 0 && amount >= threshold) {
+    message += ` ${t("devBuyThresholdWarning").replace("{threshold}", formatBnb(threshold))}`;
+  }
+  $("#devBuyReceiveText").textContent = message;
 }
 
 function openDevBuyModal(params) {
@@ -2867,10 +2955,14 @@ async function handleCreateToken() {
 }
 
 async function submitCreateTokenWithDevBuy() {
-  const buttons = [$("#createTokenButton"), $("#createTokenButtonSecondary")];
+  const confirmButton = $("#confirmDevBuy");
+  const buttons = [$("#createTokenButton"), $("#createTokenButtonSecondary"), confirmButton];
   buttons.forEach((button) => {
+    if (!button) {
+      return;
+    }
     button.disabled = true;
-    button.textContent = t("submitPending");
+    button.textContent = button === confirmButton ? t("devBuyCreatingStatus") : t("submitPending");
   });
 
   try {
@@ -2885,6 +2977,12 @@ async function submitCreateTokenWithDevBuy() {
     if (tokenAmountEstimate <= 0) {
       throw new Error("首买金额太小，请提高 BNB 金额。");
     }
+    setCreateStatus(
+      devBuyBnb >= Number(params.launchThresholdBnb || 0)
+        ? t("devBuyThresholdWarning").replace("{threshold}", formatBnb(params.launchThresholdBnb))
+        : t("devBuyCreatingStatus"),
+      devBuyBnb >= Number(params.launchThresholdBnb || 0) ? "warning" : ""
+    );
     params.devBuyBnb = String(devBuyBnb);
     params.devBuyTokenAmount = ethers.parseEther(String(tokenAmountEstimate.toFixed(12))).toString();
     validateCreateRequest(params);
@@ -2973,8 +3071,11 @@ async function submitCreateTokenWithDevBuy() {
     setCreateStatus(message, "error");
   } finally {
     buttons.forEach((button) => {
+      if (!button) {
+        return;
+      }
       button.disabled = false;
-      button.textContent = t("createToken");
+      button.textContent = button === confirmButton ? t("confirmDevBuy") : t("createToken");
     });
   }
 }

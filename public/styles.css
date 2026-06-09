@@ -475,6 +475,10 @@ select {
   color: #9cf0df;
 }
 
+.create-status.warning {
+  color: #f5c067;
+}
+
 .panel-page {
   display: none;
   width: 100%;
