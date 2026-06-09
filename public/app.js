@@ -646,6 +646,18 @@ async function refreshTradeDividendInfo(project = state.selectedProject) {
   return dividendInfo;
 }
 
+function hasDividendTaxEnabled(project) {
+  if (!project || !project.taxEnabled) {
+    return false;
+  }
+  const configuredDividendTaxBps = Number(project.dividendTaxBps || 0);
+  if (configuredDividendTaxBps > 0) {
+    return true;
+  }
+  const distributed = Number(project.dividendInfo && project.dividendInfo.totalDistributedBnb || 0);
+  return distributed > 0;
+}
+
 function renderTradeMetaRow(project) {
   const container = $("#tradeMetaRow");
   if (!container) {
@@ -696,7 +708,10 @@ function renderTradeMetaRow(project) {
   }
 
   const dividendInfo = project && project.dividendInfo;
-  if (dividendInfo && dividendInfo.supported) {
+  const canShowDividendMeta = dividendInfo && dividendInfo.supported && hasDividendTaxEnabled(project);
+  const claimableDividendBnb = Number(dividendInfo && dividendInfo.withdrawableBnb || 0);
+  const claimDisabled = state.claimingDividend || !state.wallet || claimableDividendBnb <= 0;
+  if (canShowDividendMeta) {
     items.push(`<span class="trade-meta-chip">${t("dividendClaimable")} ${formatBnb(Number(dividendInfo.withdrawableBnb || 0), 6)}</span>`);
     items.push(`<span class="trade-meta-chip">${t("dividendTotal")} ${formatBnb(Number(dividendInfo.totalDistributedBnb || 0), 6)}</span>`);
     items.push(`
@@ -704,7 +719,7 @@ function renderTradeMetaRow(project) {
         class="trade-meta-action${state.claimingDividend ? " loading" : ""}"
         type="button"
         data-claim-dividend
-        ${state.claimingDividend ? "disabled" : ""}
+        ${claimDisabled ? "disabled" : ""}
       >${state.claimingDividend ? t("dividendClaiming") : t("dividendClaimAction")}</button>
     `);
   }
@@ -715,7 +730,7 @@ function renderTradeMetaRow(project) {
 
 async function handleClaimDividend() {
   const project = state.selectedProject;
-  if (!project || !window.ethers || !ethers.isAddress(project.contract || "")) {
+  if (!project || !window.ethers || !ethers.isAddress(project.contract || "") || !hasDividendTaxEnabled(project)) {
     return;
   }
   try {
@@ -2693,6 +2708,7 @@ function addCreatedProject(params, created) {
     launchpadAddress: config.launchpadAddress,
     projectTaxBps: Number(params.projectMechanismTaxBps || 0),
     taxEnabled: Boolean(params.taxEnabled),
+    dividendTaxBps: Number(params.taxAllocationBps && params.taxAllocationBps.holderDividendsAutoBnb || 0),
     metadata: params.metadata,
     change: 0,
     listed: false,
