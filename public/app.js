@@ -478,12 +478,32 @@ async function loadBackendProjects() {
     mergeProjects(data.projects || []);
     renderTradeTicker();
     renderProjects();
+    refreshProjectHolderCounts();
   } catch {
     projects = [];
   } finally {
     state.marketLoading = false;
     renderProjects();
   }
+}
+
+async function refreshProjectHolderCounts(limit = 80) {
+  const candidates = projects
+    .filter((project) => project.projectId !== undefined && project.projectId !== null && project.contract)
+    .slice(0, limit);
+  await Promise.all(candidates.map(async (project) => {
+    try {
+      const data = await apiGet(`/api/trades?projectId=${encodeURIComponent(project.projectId)}&token=${encodeURIComponent(project.contract || "")}`);
+      const holderCount = computeHoldersFromTrades(data.trades || []).length;
+      if (Number(project.holders || 0) !== holderCount) {
+        project.holders = holderCount;
+        apiPost("/api/projects/upsert", project).catch(() => {});
+      }
+    } catch {
+      // Holder counts are supplemental; keep the market usable if a trade request fails.
+    }
+  }));
+  renderProjects();
 }
 
 function normalizeAddress(address) {
@@ -569,7 +589,7 @@ async function buildProjectFromChain(projectId, basics, provider, launchpadContr
     status: launched ? "已发射" : "内盘",
     stage: getProjectStage(launched, progress),
     progress,
-    cap: basics.walletCap ? Math.max(0, Number(ethers.formatEther(basics.walletCap))) : 100,
+    cap: basics.walletCap ? Math.max(0, Number(ethers.formatEther(basics.walletCap))) : 0,
     raised: `${bnbRaised.toFixed(3)} / ${launchThreshold || 0} BNB`,
     holders: 0,
     marketCap: Math.round(marketCap),
@@ -620,15 +640,6 @@ async function findProjectByTokenAddress(tokenAddress) {
   if (existing) {
     return existing;
   }
-  if (!params.name) {
-    throw new Error("请填写项目名称。");
-  }
-  if (!params.symbol) {
-    throw new Error("请填写代币符号。");
-  }
-  if (!state.avatarFileName || !state.avatarUrl) {
-    throw new Error("请上传项目头像。");
-  }
   if (!hasConfiguredAddress(config.launchpadAddress)) {
     throw new Error("config.js 里还没有填写 launchpadAddress，无法从链上反查项目。");
   }
@@ -673,7 +684,7 @@ async function findProjectByTokenAddress(tokenAddress) {
       status: basics.launched ? "已发射" : "内盘",
       stage: basics.launched ? "launched" : "new",
       progress,
-      cap: basics.walletCap ? Math.max(0, Number(ethers.formatEther(basics.walletCap))) : 100,
+      cap: basics.walletCap ? Math.max(0, Number(ethers.formatEther(basics.walletCap))) : 0,
       raised: `${bnbRaised.toFixed(3)} / ${launchThreshold || 0} BNB`,
       holders: 0,
       marketCap: Math.round(marketCap),
@@ -779,6 +790,31 @@ function parseRaisedBnb(project) {
 function parseLaunchThreshold(project) {
   const match = String(project.raised || "").match(/\/\s*([0-9.]+)/);
   return match ? Number(match[1]) : 0;
+}
+
+function isWalletCapEnabled(project) {
+  return Number(project && project.cap) > 0;
+}
+
+function formatCapDisplay(project) {
+  return isWalletCapEnabled(project) ? `${Number(project.cap)} ${t("tokenUnit")}` : t("noWalletCap");
+}
+
+function computeHoldersFromTrades(trades = []) {
+  const holderMap = new Map();
+  trades.forEach((trade) => {
+    const account = normalizeAddress(trade.account);
+    if (!account) {
+      return;
+    }
+    const current = holderMap.get(account) || { account: trade.account, amount: 0 };
+    const delta = Number(trade.tokenAmount || 0) * (trade.side === "sell" ? -1 : 1);
+    current.amount += delta;
+    holderMap.set(account, current);
+  });
+  return Array.from(holderMap.values())
+    .filter((holder) => holder.amount > 0.000001)
+    .sort((a, b) => b.amount - a.amount);
 }
 
 function getProjectTimeValue(project) {
@@ -904,7 +940,7 @@ function renderProjects() {
           </div>
           <div>
             <dt>${t("walletCapLabel")}:</dt>
-            <dd>${project.cap} 枚</dd>
+            <dd>${formatCapDisplay(project)}</dd>
           </div>
           <div>
             <dt>${t("holdersLabel")}:</dt>
@@ -1629,7 +1665,7 @@ async function estimateSwapReceive() {
           return;
         }
         const bnbAmount = ethers.parseEther(String(amount));
-        const maxTokenAmount = ethers.parseEther(String(project.cap || 100));
+        const maxTokenAmount = ethers.parseEther(String(isWalletCapEnabled(project) ? project.cap : 10_000));
         const estimated = await estimateTokenAmountForBnb(launchpad, BigInt(project.projectId), bnbAmount, maxTokenAmount);
         if (estimated > 0n) {
           $("#swapReceive").textContent = `您将收到: ${Number(ethers.formatEther(estimated)).toFixed(6)} ${project.symbol}`;
@@ -1671,7 +1707,11 @@ async function updateBuyCapQuote(project = state.selectedProject) {
     return;
   }
   element.hidden = false;
-  const capTokens = Math.max(1, Number(project.cap || 100));
+  if (!isWalletCapEnabled(project)) {
+    element.textContent = "不限购";
+    return;
+  }
+  const capTokens = Math.max(1, Number(project.cap));
   element.textContent = `${capTokens} 枚预计需要 -- BNB`;
   try {
     if (
@@ -1731,7 +1771,7 @@ function addCreatedProject(params, created) {
     status: "内盘",
     stage: "new",
     progress: 0,
-    cap: params.walletCapEnabled ? Number(params.maxWalletBuyTokens) : 100,
+    cap: params.walletCapEnabled ? Number(params.maxWalletBuyTokens) : 0,
     raised: `0 / ${params.launchThresholdBnb} BNB`,
     holders: 0,
     marketCap: 0,
@@ -1827,7 +1867,7 @@ async function handleSwapSubmit() {
     const launchpad = getLaunchpadContract(signer);
 
     if (state.swapSide === "buy") {
-      const maxTokenAmount = ethers.parseEther(String(project.cap || 100));
+      const maxTokenAmount = ethers.parseEther(String(isWalletCapEnabled(project) ? project.cap : 10_000));
       let tokenAmount;
       if (state.buyInputMode === "token") {
         tokenAmount = ethers.parseEther(String(rawAmount));
@@ -1931,7 +1971,7 @@ function setSwapSide(side) {
   $("#swapAmount").step = side === "buy" ? "0.01" : "0.000001";
   $("#swapAmount").placeholder = side === "buy" ? "输入 BNB 数量" : `输入 ${project ? project.symbol : "代币"} 数量`;
   $("#swapLimit").textContent = side === "buy"
-    ? `最大限度 ${project ? project.cap : 0} 枚`
+    ? (project ? `限购：${formatCapDisplay(project)}` : "限购：--")
     : "选择卖出比例或手动输入代币数量";
   const canTrade = project && project.projectId !== undefined && project.projectId !== null && window.ethers && ethers.isAddress(project.contract || "");
   $("#swapSubmit").disabled = !canTrade;
@@ -1985,20 +2025,7 @@ function setTradeView(view) {
 function renderHolderList(project, trades = []) {
   const symbol = project.symbol || "";
   const totalSupply = Math.max(0, Number(project.totalSupply || 10_000));
-  const holderMap = new Map();
-  trades.forEach((trade) => {
-    const account = normalizeAddress(trade.account);
-    if (!account) {
-      return;
-    }
-    const current = holderMap.get(account) || { account: trade.account, amount: 0 };
-    const delta = Number(trade.tokenAmount || 0) * (trade.side === "sell" ? -1 : 1);
-    current.amount += delta;
-    holderMap.set(account, current);
-  });
-  const holders = Array.from(holderMap.values())
-    .filter((holder) => holder.amount > 0.000001)
-    .sort((a, b) => b.amount - a.amount);
+  const holders = computeHoldersFromTrades(trades);
   const formatHolderPercent = (value) => {
     if (!Number.isFinite(value) || value <= 0) {
       return "0%";
@@ -2040,6 +2067,16 @@ async function refreshTradeData(project) {
     ]);
     const trades = tradesData.trades || [];
     const candles = (candlesData.candles || []).length ? candlesData.candles : buildCandlesFromTrades(trades);
+    const holderCount = computeHoldersFromTrades(trades).length;
+    if (Number(project.holders || 0) !== holderCount) {
+      project.holders = holderCount;
+      const index = projects.findIndex((item) => normalizeAddress(item.contract) === normalizeAddress(project.contract));
+      if (index >= 0) {
+        projects[index] = { ...projects[index], holders: holderCount };
+        renderProjects();
+        apiPost("/api/projects/upsert", projects[index]).catch(() => {});
+      }
+    }
     renderTradeTable(project, trades);
     renderHolderList(project, trades);
     updateTradeStats(project, trades);
@@ -2362,6 +2399,15 @@ async function switchToBsc() {
 function validateCreateRequest(params) {
   if (!window.ethers) {
     throw new Error("ethers 未加载，请先运行 npm install 并刷新页面。");
+  }
+  if (!params.name) {
+    throw new Error("Project name is required.");
+  }
+  if (!params.symbol) {
+    throw new Error("Token symbol is required.");
+  }
+  if (!state.avatarFileName || !state.avatarUrl) {
+    throw new Error("Project avatar is required.");
   }
   if (!hasConfiguredAddress(config.launchpadAddress)) {
     throw new Error("请先在 config.js 填写已部署的 launchpadAddress。");
