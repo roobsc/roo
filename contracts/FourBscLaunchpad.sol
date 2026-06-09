@@ -134,6 +134,7 @@ contract LaunchpadToken {
  */
 contract FourBscLaunchpad {
     uint256 public constant TOKEN_SUPPLY = 10_000 ether;
+    uint256 public constant INTERNAL_SALE_SUPPLY = 8_000 ether;
     uint256 public constant MIN_WALLET_CAP = 1 ether;
     uint256 public constant MAX_WALLET_CAP = 100 ether;
     uint256 public constant MIN_LAUNCH_THRESHOLD = 0.05 ether;
@@ -232,6 +233,7 @@ contract FourBscLaunchpad {
         uint256 tokenAmount,
         uint256 bnbAmount
     );
+    event ProjectAutoLaunchFailed(uint256 indexed projectId, address indexed token, bytes errorData);
     event ProjectTaxAllocation(
         uint256 indexed projectId,
         uint16 marketingBps,
@@ -443,6 +445,7 @@ contract FourBscLaunchpad {
         require(!project.launched, "LAUNCHPAD: launched");
         require(tokenAmount > 0, "LAUNCHPAD: zero amount");
         uint256 burnAmount = _burnAmount(project, tokenAmount);
+        require(project.tokensSold + tokenAmount <= INTERNAL_SALE_SUPPLY, "LAUNCHPAD: sold out");
         require(project.tokensSold + project.tokensBurned + tokenAmount + burnAmount <= TOKEN_SUPPLY, "LAUNCHPAD: sold out");
         if (project.walletCap > 0) {
             require(walletPurchased[projectId][buyer] + tokenAmount <= project.walletCap, "LAUNCHPAD: wallet cap");
@@ -471,6 +474,10 @@ contract FourBscLaunchpad {
         }
         LaunchpadToken(project.token).launchpadTransferTo(buyer, tokenAmount);
         emit InternalBuy(projectId, buyer, tokenAmount, grossCost, platformTax);
+
+        if (project.bnbRaised >= project.launchThreshold) {
+            _tryLaunchToPancake(projectId, project, false);
+        }
     }
 
     function sell(uint256 projectId, uint256 tokenAmount) external projectExists(projectId) nonReentrant {
@@ -504,26 +511,42 @@ contract FourBscLaunchpad {
         require(!project.launched, "LAUNCHPAD: already launched");
         require(project.bnbRaised >= project.launchThreshold, "LAUNCHPAD: threshold not met");
 
+        bool launched = _tryLaunchToPancake(projectId, project, true);
+        require(launched, "LAUNCHPAD: pancake launch failed");
+    }
+
+    function _tryLaunchToPancake(
+        uint256 projectId,
+        Project storage project,
+        bool revertOnFailure
+    ) private returns (bool) {
         uint256 tokenAmount = LaunchpadToken(project.token).balanceOf(address(this));
         uint256 bnbAmount = project.bnbRaised;
         require(tokenAmount > 0 && bnbAmount > 0, "LAUNCHPAD: empty liquidity");
 
-        project.launched = true;
-        project.bnbRaised = 0;
-
         LaunchpadToken(project.token).approve(address(pancakeRouter), tokenAmount);
-        pancakeRouter.addLiquidityETH{value: bnbAmount}(
+        try pancakeRouter.addLiquidityETH{value: bnbAmount}(
             project.token,
             tokenAmount,
             0,
             0,
             BURN_ADDRESS,
             block.timestamp + 900
-        );
-        LaunchpadToken(project.token).launchpadRenounceOwnership();
+        ) {
+            project.launched = true;
+            project.bnbRaised = 0;
+            LaunchpadToken(project.token).launchpadRenounceOwnership();
 
-        emit ProjectLaunched(projectId, project.token, tokenAmount, bnbAmount);
-        emit ProjectTokenOwnershipRenounced(projectId, project.token);
+            emit ProjectLaunched(projectId, project.token, tokenAmount, bnbAmount);
+            emit ProjectTokenOwnershipRenounced(projectId, project.token);
+            return true;
+        } catch (bytes memory errorData) {
+            if (revertOnFailure) {
+                return false;
+            }
+            emit ProjectAutoLaunchFailed(projectId, project.token, errorData);
+            return false;
+        }
     }
 
     function confirmExternalLaunchAndRenounceByToken(address token) external onlyOwner nonReentrant {
@@ -625,15 +648,15 @@ contract FourBscLaunchpad {
             return 0;
         }
         uint256 endSold = startSold + tokenAmount;
-        require(endSold <= TOKEN_SUPPLY, "LAUNCHPAD: sold out");
+        require(endSold <= INTERNAL_SALE_SUPPLY, "LAUNCHPAD: sold out");
 
         uint256 baseAmount =
             (tokenAmount * launchThreshold * CURVE_BASE_BPS) /
-            (TOKEN_SUPPLY * BPS_DENOMINATOR);
+            (INTERNAL_SALE_SUPPLY * BPS_DENOMINATOR);
         uint256 area = (endSold * endSold) - (startSold * startSold);
         uint256 slopeAmount =
             (launchThreshold * CURVE_SLOPE_BPS * area) /
-            (2 * TOKEN_SUPPLY * TOKEN_SUPPLY * BPS_DENOMINATOR);
+            (2 * INTERNAL_SALE_SUPPLY * INTERNAL_SALE_SUPPLY * BPS_DENOMINATOR);
 
         return baseAmount + slopeAmount;
     }

@@ -1,6 +1,8 @@
 const config = window.LAUNCHPAD_CONFIG || {};
 const defaultAvatar = "./assets/roo-avatar.jpg";
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+const TOTAL_TOKEN_SUPPLY = 10_000;
+const INTERNAL_SALE_SUPPLY = 8_000;
 
 const LAUNCHPAD_ABI = [
   {
@@ -560,7 +562,7 @@ async function buildProjectFromChain(projectId, basics, provider, launchpadContr
   const token = new ethers.Contract(basics.token, ERC20_ABI, provider);
   let name = `Project ${projectId}`;
   let symbol = `P${projectId}`;
-  let totalSupply = 10_000;
+  let totalSupply = TOTAL_TOKEN_SUPPLY;
   try {
     [name, symbol] = await Promise.all([token.name(), token.symbol()]);
   } catch {
@@ -569,7 +571,7 @@ async function buildProjectFromChain(projectId, basics, provider, launchpadContr
   try {
     totalSupply = Number(ethers.formatEther(await token.totalSupply()));
   } catch {
-    totalSupply = 10_000;
+    totalSupply = TOTAL_TOKEN_SUPPLY;
   }
   const launchThreshold = Number(ethers.formatEther(basics.launchThreshold || 0n));
   const bnbRaised = Number(ethers.formatEther(basics.bnbRaised || 0n));
@@ -577,7 +579,7 @@ async function buildProjectFromChain(projectId, basics, provider, launchpadContr
   const averagePriceBnb = tokensSold > 0 ? bnbRaised / tokensSold : 0;
   const launchpad = launchpadContract || getLaunchpadContract(provider);
   const priceBnb = await readCurrentPriceBnb(projectId, launchpad, averagePriceBnb);
-  const marketCap = priceBnb > 0 ? priceBnb * 10_000 * 600 : bnbRaised * 600;
+  const marketCap = priceBnb > 0 ? priceBnb * TOTAL_TOKEN_SUPPLY * 600 : bnbRaised * 600;
   const progress = launchThreshold > 0
     ? Math.min(100, Number(((bnbRaised / launchThreshold) * 100).toFixed(3)))
     : 0;
@@ -659,7 +661,7 @@ async function findProjectByTokenAddress(tokenAddress) {
     const token = new ethers.Contract(basics.token, ERC20_ABI, provider);
     let name = `Project ${projectId}`;
     let symbol = `P${projectId}`;
-    let totalSupply = 10_000;
+    let totalSupply = TOTAL_TOKEN_SUPPLY;
     try {
       [name, symbol] = await Promise.all([token.name(), token.symbol()]);
     } catch {
@@ -668,14 +670,14 @@ async function findProjectByTokenAddress(tokenAddress) {
     try {
       totalSupply = Number(ethers.formatEther(await token.totalSupply()));
     } catch {
-      totalSupply = 10_000;
+      totalSupply = TOTAL_TOKEN_SUPPLY;
     }
     const launchThreshold = Number(ethers.formatEther(basics.launchThreshold || 0n));
     const bnbRaised = Number(ethers.formatEther(basics.bnbRaised || 0n));
     const tokensSold = Number(ethers.formatEther(basics.tokensSold || 0n));
     const averagePriceBnb = tokensSold > 0 ? bnbRaised / tokensSold : 0;
     const priceBnb = await readCurrentPriceBnb(projectId, launchpad, averagePriceBnb);
-    const marketCap = priceBnb > 0 ? priceBnb * 10_000 * 600 : bnbRaised * 600;
+    const marketCap = priceBnb > 0 ? priceBnb * TOTAL_TOKEN_SUPPLY * 600 : bnbRaised * 600;
     const progress = launchThreshold > 0 ? Math.min(100, Number(((bnbRaised / launchThreshold) * 100).toFixed(3))) : 0;
     return upsertLocalProject({
       projectId: String(projectId),
@@ -756,7 +758,7 @@ function estimateInitialBuyTokens(bnbAmount, params) {
   const projectTaxBps = Number(params.projectMechanismTaxBps || 0);
   const totalTaxBps = 100 + projectTaxBps;
   const poolBudget = bnb * (10_000 - totalTaxBps) / 10_000;
-  const supply = 10_000;
+  const supply = INTERNAL_SALE_SUPPLY;
   const cap = params.walletCapEnabled ? Number(params.maxWalletBuyTokens || 0) : supply;
   const maxTokens = Math.max(0, Math.min(cap || supply, supply));
   let low = 0;
@@ -1036,11 +1038,10 @@ const translations = {
     tokenUnit: "枚",
     noWalletCap: "不限购",
     devBuyModalTitle: "选择你想买入的代币数量",
-    devBuyModalCopy: "创建代币时必须进行 dev 首买，创建和买入会在同一笔链上交易中完成，避免第二笔交易被抢跑。另收 0.01 BNB 保护费进入平台钱包。",
+    devBuyModalCopy: "创建代币时必须进行 dev 首买，创建和买入会在同一笔链上交易中完成，避免第二笔交易被抢跑。",
     devBuySwitchLabel: "以 BNB 买入",
     confirmDevBuy: "确认买入！",
     devBuyReceiveText: "你将收到约 {amount} {symbol}",
-    devBuyCostText: "保护费：0.01 BNB，总支付约 {amount}",
     launchThresholdTitle: "发射阈值",
     projectTax: "项目税收",
     enableTax: "启用税收",
@@ -1199,11 +1200,10 @@ const translations = {
     tokenUnit: "tokens",
     noWalletCap: "No limit",
     devBuyModalTitle: "Choose your first-buy amount",
-    devBuyModalCopy: "A dev first buy is required when creating a token. Creation and buy happen in the same on-chain transaction to prevent second-transaction sniping. A 0.01 BNB protection fee is also sent to the platform wallet.",
+    devBuyModalCopy: "A dev first buy is required when creating a token. Creation and buy happen in the same on-chain transaction to prevent second-transaction sniping.",
     devBuySwitchLabel: "Buy with BNB",
     confirmDevBuy: "Confirm Buy!",
     devBuyReceiveText: "You will receive about {amount} {symbol}",
-    devBuyCostText: "Protection fee: 0.01 BNB, total about {amount}",
     launchThresholdTitle: "Launch threshold",
     projectTax: "Project tax",
     enableTax: "Enable tax",
@@ -1704,15 +1704,20 @@ async function estimateSwapReceive() {
         : new ethers.JsonRpcProvider(config.rpcUrl || "https://bsc-dataseed.binance.org");
       const launchpad = getLaunchpadContract(provider);
       if (state.swapSide === "buy") {
+        const capMaxTokenAmount = ethers.parseEther(String(isWalletCapEnabled(project) ? project.cap : INTERNAL_SALE_SUPPLY));
+        const maxTokenAmount = await getBuySearchUpperBound(project, provider, capMaxTokenAmount);
         if (state.buyInputMode === "token") {
-          const tokenAmount = ethers.parseEther(String(amount));
+          let tokenAmount = ethers.parseEther(String(amount));
+          if (tokenAmount > maxTokenAmount) {
+            tokenAmount = maxTokenAmount;
+            $("#buyTokenAmount").value = Number(ethers.formatEther(tokenAmount)).toFixed(6);
+          }
           const cost = await launchpad.quoteBuy(BigInt(project.projectId), tokenAmount);
           $("#swapAmount").value = Number(ethers.formatEther(cost)).toFixed(6);
           $("#swapReceive").textContent = `预计支付: ${Number(ethers.formatEther(cost)).toFixed(6)} BNB`;
           return;
         }
         const bnbAmount = ethers.parseEther(String(amount));
-        const maxTokenAmount = ethers.parseEther(String(isWalletCapEnabled(project) ? project.cap : 10_000));
         const estimated = await estimateTokenAmountForBnb(launchpad, BigInt(project.projectId), bnbAmount, maxTokenAmount);
         if (estimated > 0n) {
           $("#swapReceive").textContent = `您将收到: ${Number(ethers.formatEther(estimated)).toFixed(6)} ${project.symbol}`;
@@ -1878,7 +1883,7 @@ function requireTradableProject(project) {
   }
 }
 
-async function estimateTokenAmountForBnb(launchpad, projectId, maxBnbAmount, maxTokenAmount = ethers.parseEther("10000")) {
+async function estimateTokenAmountForBnb(launchpad, projectId, maxBnbAmount, maxTokenAmount = ethers.parseEther(String(INTERNAL_SALE_SUPPLY))) {
   if (maxBnbAmount <= 0n) {
     return 0n;
   }
@@ -1894,6 +1899,61 @@ async function estimateTokenAmountForBnb(launchpad, projectId, maxBnbAmount, max
     }
   }
   return low;
+}
+
+async function readInternalSaleRemaining(project, signerOrProvider) {
+  if (!project || project.projectId === undefined || project.projectId === null || !window.ethers || !hasConfiguredAddress(config.launchpadAddress)) {
+    return ethers.parseEther(String(INTERNAL_SALE_SUPPLY));
+  }
+  try {
+    const launchpad = getLaunchpadContract(signerOrProvider);
+    const basics = await launchpad.getProjectBasics(BigInt(project.projectId));
+    const tokensSold = Number(ethers.formatEther(basics.tokensSold || 0n));
+    const remaining = Math.max(0, INTERNAL_SALE_SUPPLY - tokensSold);
+    return ethers.parseEther(String(remaining));
+  } catch {
+    const localRemaining = Math.max(0, INTERNAL_SALE_SUPPLY - Number(project.tokensSold || 0));
+    return ethers.parseEther(String(localRemaining));
+  }
+}
+
+async function getBuySearchUpperBound(project, signerOrProvider, preferredMax = ethers.parseEther(String(INTERNAL_SALE_SUPPLY))) {
+  const remaining = await readInternalSaleRemaining(project, signerOrProvider);
+  return preferredMax < remaining ? preferredMax : remaining;
+}
+
+async function findExecutableBuyQuote(launchpad, projectId, desiredTokenAmount, slippageBps) {
+  const quote = async (amount) => {
+    if (amount <= 0n) {
+      return null;
+    }
+    const cost = await launchpad.quoteBuy(projectId, amount);
+    const value = cost + ((cost * slippageBps) / 10000n);
+    await launchpad.buy.staticCall(projectId, amount, { value });
+    return { tokenAmount: amount, cost, value };
+  };
+
+  try {
+    return await quote(desiredTokenAmount);
+  } catch {
+    // The quote can succeed while the real buy fails when burn tax consumes
+    // extra launchpad-held tokens. Binary-search the largest executable amount.
+  }
+
+  let low = 0n;
+  let high = desiredTokenAmount - 1n;
+  let best = null;
+  while (low <= high) {
+    const mid = (low + high) / 2n;
+    try {
+      const result = await quote(mid);
+      best = result;
+      low = mid + 1n;
+    } catch {
+      high = mid - 1n;
+    }
+  }
+  return best;
 }
 
 async function handleSwapSubmit() {
@@ -1914,7 +1974,8 @@ async function handleSwapSubmit() {
     const launchpad = getLaunchpadContract(signer);
 
     if (state.swapSide === "buy") {
-      const maxTokenAmount = ethers.parseEther(String(isWalletCapEnabled(project) ? project.cap : 10_000));
+      const capMaxTokenAmount = ethers.parseEther(String(isWalletCapEnabled(project) ? project.cap : INTERNAL_SALE_SUPPLY));
+      const maxTokenAmount = await getBuySearchUpperBound(project, signer, capMaxTokenAmount);
       let tokenAmount;
       if (state.buyInputMode === "token") {
         tokenAmount = ethers.parseEther(String(rawAmount));
@@ -1931,10 +1992,17 @@ async function handleSwapSubmit() {
       if (tokenAmount > maxTokenAmount) {
         tokenAmount = maxTokenAmount;
       }
-      const cost = await launchpad.quoteBuy(BigInt(project.projectId), tokenAmount);
       const slippageBps = BigInt(Math.round(Number(state.slippagePercent || 0) * 100));
-      const valueWithSlippage = cost + ((cost * slippageBps) / 10000n);
-      const tx = await launchpad.buy(BigInt(project.projectId), tokenAmount, { value: valueWithSlippage });
+      const executable = await findExecutableBuyQuote(launchpad, BigInt(project.projectId), tokenAmount, slippageBps);
+      if (!executable || executable.tokenAmount <= 0n) {
+        throw new Error("这个项目内盘已卖完，不能继续买入。");
+      }
+      if (executable.tokenAmount < tokenAmount) {
+        $("#swapReceive").textContent = `剩余可买不足，已调整为 ${Number(ethers.formatEther(executable.tokenAmount)).toFixed(6)} ${project.symbol}`;
+      }
+      tokenAmount = executable.tokenAmount;
+      const cost = executable.cost;
+      const tx = await launchpad.buy(BigInt(project.projectId), tokenAmount, { value: executable.value });
       $("#swapReceive").textContent = `购买交易已提交：${tx.hash}`;
       await tx.wait();
       await saveBackendTrade(project, {
@@ -1949,6 +2017,7 @@ async function handleSwapSubmit() {
     }
 
     const tokenAmount = ethers.parseEther(String(rawAmount));
+    const estimatedBnb = await launchpad.quoteSell(BigInt(project.projectId), tokenAmount);
     const token = new ethers.Contract(project.contract, ERC20_ABI, signer);
     const owner = await signer.getAddress();
     const allowance = await token.allowance(owner, config.launchpadAddress);
@@ -1962,7 +2031,6 @@ async function handleSwapSubmit() {
     const tx = await launchpad.sell(BigInt(project.projectId), tokenAmount);
     $("#swapReceive").textContent = `卖出交易已提交：${tx.hash}`;
     await tx.wait();
-    const estimatedBnb = await launchpad.quoteSell(BigInt(project.projectId), tokenAmount);
     await saveBackendTrade(project, {
       side: "sell",
       txHash: tx.hash,
@@ -1972,9 +2040,18 @@ async function handleSwapSubmit() {
     $("#swapReceive").textContent = `卖出成功，预估返回 ${ethers.formatEther(estimatedBnb)} BNB`;
     await refreshTradeData(project);
   } catch (error) {
-    const message = error && (error.shortMessage || error.reason || error.message)
+    let message = error && (error.shortMessage || error.reason || error.message)
       ? (error.shortMessage || error.reason || error.message)
       : "交易失败，请检查钱包和参数。";
+    if (String(message).includes("LAUNCHPAD: sold out")) {
+      message = "这个项目内盘已卖完，不能继续买入。";
+    } else if (String(message).includes("LAUNCHPAD: wallet cap")) {
+      message = "本钱包已达到该项目限购额度。";
+    } else if (String(message).includes("LAUNCHPAD: sell amount")) {
+      message = "卖出数量超过当前可卖数量，请减少数量或刷新余额后重试。";
+    } else if (String(message).includes("LAUNCHPAD: insufficient BNB")) {
+      message = "BNB 数量不足，请稍微提高滑点或减少买入数量。";
+    }
     $("#swapReceive").textContent = message;
   } finally {
     button.disabled = false;
@@ -2038,7 +2115,7 @@ function getTradeSummary(project, trades = []) {
   const priceBnb = lastTrade && Number(lastTrade.priceBnb || 0) > 0
     ? Number(lastTrade.priceBnb)
     : Number(project.priceBnb || 0);
-  const marketCap = priceBnb > 0 ? priceBnb * 10_000 * 600 : Number(project.marketCap || 0);
+  const marketCap = priceBnb > 0 ? priceBnb * TOTAL_TOKEN_SUPPLY * 600 : Number(project.marketCap || 0);
   return {
     count: trades.length,
     volumeBnb,
@@ -2058,7 +2135,7 @@ function updateTradeStats(project, trades = []) {
     .replace("{volume}", formatUsd(summary.volumeUsd, 2))
     .replace("{count}", summary.count);
   $("#tradeCreated").textContent = formatCreatedTime(project);
-  const remaining = Math.max(0, 10_000 - Number(project.tokensSold || 0));
+  const remaining = Math.max(0, INTERNAL_SALE_SUPPLY - Number(project.tokensSold || 0));
   $("#bondingText").innerHTML = t("bondingText")
     .replace("{remaining}", remaining.toLocaleString(undefined, { maximumFractionDigits: 3 }))
     .replace("{symbol}", project.symbol)
@@ -2076,7 +2153,7 @@ function setTradeView(view) {
 
 function renderHolderList(project, trades = []) {
   const symbol = project.symbol || "";
-  const totalSupply = Math.max(0, Number(project.totalSupply || 10_000));
+  const totalSupply = Math.max(0, Number(project.totalSupply || TOTAL_TOKEN_SUPPLY));
   const holders = computeHoldersFromTrades(trades);
   const formatHolderPercent = (value) => {
     if (!Number.isFinite(value) || value <= 0) {
@@ -2571,8 +2648,6 @@ function updateDevBuyModalQuote() {
   $("#devBuyReceiveText").textContent = t("devBuyReceiveText")
     .replace("{amount}", formatTokenAmount(tokens, 6))
     .replace("{symbol}", params.symbol || t("tokenUnit"));
-  $("#devBuyCostText").textContent = t("devBuyCostText")
-    .replace("{amount}", formatBnb(amount + 0.01, 6));
 }
 
 function openDevBuyModal(params) {
