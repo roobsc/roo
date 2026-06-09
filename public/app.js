@@ -501,6 +501,72 @@ function escapeAttr(value) {
     .replace(/>/g, "&gt;");
 }
 
+function ensureExternalUrl(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "";
+  }
+  try {
+    return new URL(text).toString();
+  } catch {
+    try {
+      return new URL(`https://${text.replace(/^\/+/, "")}`).toString();
+    } catch {
+      return "";
+    }
+  }
+}
+
+function renderProjectSocialLinks(project) {
+  const container = $("#projectSocialLinks");
+  if (!container) {
+    return;
+  }
+  const metadata = project && project.metadata ? project.metadata : {};
+  const links = [
+    {
+      href: ensureExternalUrl(metadata.x),
+      label: "X",
+      icon: `
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M4 4h4.6l4.1 5.7L17.7 4H20l-6.1 7.1L20 20h-4.6l-4.4-6.2L5.8 20H3.5l6.4-7.5z"></path>
+        </svg>
+      `
+    },
+    {
+      href: ensureExternalUrl(metadata.telegram),
+      label: "TG",
+      icon: `
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M20.7 4.3 3.8 10.8c-1.1.4-1 2 .1 2.3l4.3 1.3 1.7 5.2c.2.7 1.1.9 1.6.4l2.5-2.4 4.8 3.5c.8.6 2 .1 2.2-.9l2.7-14.1c.2-1.1-.9-2-1.9-1.6zM9.3 13.9l8-6.3-6 7.7-.2 2.6z"></path>
+        </svg>
+      `
+    },
+    {
+      href: ensureExternalUrl(metadata.website),
+      label: "WEB",
+      icon: `
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M12 3a9 9 0 1 0 0 18a9 9 0 0 0 0-18zm6.8 8h-3.1a14.8 14.8 0 0 0-1.4-5A7.1 7.1 0 0 1 18.8 11zM12 5.1c.9 1.1 1.8 3.1 2.2 5.9H9.8c.4-2.8 1.3-4.8 2.2-5.9zM9.7 6A14.8 14.8 0 0 0 8.3 11H5.2A7.1 7.1 0 0 1 9.7 6zm-4.5 7h3.1a14.8 14.8 0 0 0 1.4 5A7.1 7.1 0 0 1 5.2 13zM12 18.9c-.9-1.1-1.8-3.1-2.2-5.9h4.4c-.4 2.8-1.3 4.8-2.2 5.9zm2.3-.9a14.8 14.8 0 0 0 1.4-5h3.1A7.1 7.1 0 0 1 14.3 18z"></path>
+        </svg>
+      `
+    }
+  ].filter((item) => item.href);
+
+  if (!links.length) {
+    container.hidden = true;
+    container.innerHTML = "";
+    return;
+  }
+
+  container.hidden = false;
+  container.innerHTML = links.map((item) => `
+    <a class="project-social-link" href="${escapeAttr(item.href)}" target="_blank" rel="noreferrer" aria-label="${escapeAttr(item.label)}">
+      <span class="project-social-icon">${item.icon}</span>
+    </a>
+  `).join("");
+}
+
 function getProjectAvatarMarkup(project) {
   const avatarUrl = project.avatarUrl || defaultAvatar;
   if (avatarUrl) {
@@ -534,6 +600,22 @@ async function apiPost(path, data) {
     throw new Error(`API ${path} failed`);
   }
   return response.json();
+}
+
+async function loadPairStats(token, pairAddress = "") {
+  if (!token) {
+    return null;
+  }
+  try {
+    const query = new URLSearchParams();
+    query.set("token", token);
+    if (pairAddress) {
+      query.set("pair", pairAddress);
+    }
+    return await apiGet(`/api/pair-stats?${query.toString()}`);
+  } catch {
+    return null;
+  }
 }
 
 function mergeProjects(realProjects) {
@@ -1010,13 +1092,17 @@ function setCreateStatus(message, mode = "") {
 }
 
 function formatMarketCap(value) {
-  if (value >= 1_000_000) {
-    return `${(value / 1_000_000).toFixed(2)}M`;
+  const rounded = Math.ceil(Number(value || 0));
+  if (!Number.isFinite(rounded) || rounded <= 0) {
+    return "0";
   }
-  if (value >= 1_000) {
-    return `${(value / 1_000).toFixed(value >= 100_000 ? 0 : 2)}K`;
+  if (rounded >= 1_000_000) {
+    return `${(rounded / 1_000_000).toFixed(2)}M`;
   }
-  return String(value);
+  if (rounded >= 1_000) {
+    return `${(rounded / 1_000).toFixed(rounded >= 100_000 ? 0 : 2)}K`;
+  }
+  return String(rounded);
 }
 
 function formatTokenAmount(value, digits = 3) {
@@ -1035,6 +1121,14 @@ function formatUsd(value, digits = 2) {
     return "$0";
   }
   return `$${formatMarketCap(Number(number.toFixed(digits)))}`;
+}
+
+function formatUsdCeil(value) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number) || number <= 0) {
+    return "$0";
+  }
+  return `$${formatMarketCap(Math.ceil(number))}`;
 }
 
 function formatBnb(value, digits = 6) {
@@ -1710,13 +1804,14 @@ async function readPancakeMarketData(project, provider, bnbUsd = BNB_USD_FALLBAC
   const totalSupply = Number(project.totalSupply || TOTAL_TOKEN_SUPPLY);
   const marketCap = priceBnb * totalSupply * bnbUsd;
   const liquidityUsd = reserveBnb * 2 * bnbUsd;
+  const pairStats = await loadPairStats(project.contract, pairAddress);
   return {
     ...project,
     pairAddress,
     priceBnb,
     marketCap,
-    liquidityUsd,
-    volume24h: Number(project.volume24h || 0)
+    liquidityUsd: Number(pairStats && pairStats.liquidityUsd ? pairStats.liquidityUsd : liquidityUsd),
+    volume24h: Number(pairStats && pairStats.volume24h ? pairStats.volume24h : project.volume24h || 0)
   };
 }
 
@@ -1761,7 +1856,7 @@ function renderRanking() {
     const rank = index + 1;
     const displayValue = sortKey === "volume24h"
       ? formatUsd(project.volume24h || 0, 2)
-      : formatUsd(project.marketCap || 0, 2);
+      : formatUsdCeil(project.marketCap || 0);
     const rankClass = rank <= 3 ? `rank-top rank-${rank}` : "";
     return `
       <button class="leaderboard-row ${rankClass}" type="button" data-rank-token="${escapeAttr(project.contract || "")}">
@@ -2752,7 +2847,7 @@ function updateTradeStats(project, trades = []) {
   const summary = getTradeSummary(project, trades);
   const liquidityUsd = Number(project.liquidityUsd || 0) || parseRaisedBnb(project) * 600;
   $("#tradePrice").textContent = summary.priceBnb > 0 ? formatBnb(summary.priceBnb, 8) : "--";
-  $("#tradeMarketCap").textContent = formatUsd(summary.marketCap, 2);
+  $("#tradeMarketCap").textContent = formatUsdCeil(summary.marketCap);
   $("#tradeLiquidity").textContent = formatUsd(liquidityUsd, 2);
   $("#tradeVolume").textContent = t("tradeVolumeTemplate")
     .replace("{volume}", formatUsd(summary.volumeUsd, 2))
@@ -2873,6 +2968,7 @@ async function refreshOpenTradeProjectFromChain(project) {
     const displayProgress = getDisplayProgress(freshProject);
     $("#bondingValue").textContent = `${displayProgress}%`;
     $("#bondingBar").style.width = `${displayProgress}%`;
+    renderProjectSocialLinks(freshProject);
     $("#infoDescription").textContent = freshProject.listed
       ? t("tradeListedDescription")
       : t("tradeInternalDescription");
@@ -2908,6 +3004,7 @@ function openTradeModal(project) {
   $("#bondingBar").style.width = `${displayProgress}%`;
   $("#infoName").textContent = project.name;
   $("#infoSymbol").textContent = project.symbol;
+  renderProjectSocialLinks(project);
   $("#infoDescription").textContent = project.listed
     ? t("tradeListedDescription")
     : t("tradeInternalDescription");

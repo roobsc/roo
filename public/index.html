@@ -15,9 +15,9 @@
           <img src="./assets/roo-avatar.jpg" alt="" />
           <span>
             <strong>roo</strong>
-            <small>roo-bsc-launchpad</small>
           </span>
         </div>
+        <div class="rail-menu">
         <button class="rail-item active" type="button" data-rail-tab="market">
           <span>⌂</span>
           <strong data-i18n="drawerMarket">发射台</strong>
@@ -38,6 +38,13 @@
           <span>?</span>
           <strong>FAQ</strong>
         </button>
+        </div>
+        <div class="rail-footer">
+          <div class="language-toggle rail-language" aria-label="Language">
+            <button type="button" data-lang="en">EN</button>
+            <button class="active" type="button" data-lang="zh">中文</button>
+          </div>
+        </div>
       </aside>
       <div class="trade-ticker" aria-label="Latest trades">
         <div id="tradeTickerTrack" class="trade-ticker-track"></div>
@@ -65,7 +72,7 @@
         </nav>
 
         <div class="top-actions">
-          <div class="language-toggle top-language" aria-label="Language">
+          <div class="language-toggle top-language" aria-label="Language" hidden>
             <button type="button" data-lang="en">EN</button>
             <button class="active" type="button" data-lang="zh">中文</button>
           </div>
@@ -506,6 +513,12 @@
         <button type="button" data-drawer-tab="treasury" data-i18n="drawerTreasury">金库</button>
         <button type="button" data-drawer-tab="profile" data-i18n="drawerProfile">个人资料</button>
         <button type="button" data-drawer-tab="faq">FAQ</button>
+        <div class="drawer-footer">
+          <div class="language-toggle drawer-language" aria-label="Language">
+            <button type="button" data-lang="en">EN</button>
+            <button class="active" type="button" data-lang="zh">中文</button>
+          </div>
+        </div>
       </aside>
     </div>
 
@@ -598,7 +611,6 @@
             </div>
 
             <div class="trade-tabs">
-              <button type="button">评论</button>
               <button class="active" type="button">交易</button>
             </div>
             <div class="trade-table" id="tradeTable"></div>
@@ -672,6 +684,7 @@
                   <p id="infoSymbol">ROO</p>
                 </div>
               </div>
+              <div id="projectSocialLinks" class="project-social-links" hidden></div>
               <p id="infoDescription">使用 roo 的暖色交易面板查看内盘走势、买卖和发射进度。</p>
             </section>
             <section class="holder-panel">

@@ -44,6 +44,7 @@ const bscscanApiKey = process.env.BSCSCAN_API_KEY || "";
 const postgresUrl = process.env.POSTGRES_URL || process.env.DATABASE_URL || "";
 const blobToken = process.env.BLOB_READ_WRITE_TOKEN || "";
 const maxAvatarBytes = 2 * 1024 * 1024;
+const dexscreenerApiBase = process.env.DEXSCREENER_API_URL || "https://api.dexscreener.com/latest/dex/tokens";
 const sql = postgresUrl
   ? postgres(postgresUrl, {
       ssl: postgresUrl.includes("sslmode=disable") ? false : "require",
@@ -354,6 +355,32 @@ function send(res, status, body, headers = {}) {
 
 function sendJson(res, status, data) {
   send(res, status, JSON.stringify(data), { "Content-Type": "application/json; charset=utf-8" });
+}
+
+async function fetchDexPairStats(token, pairAddress = "") {
+  const normalizedToken = normalizeToken(token);
+  if (!normalizedToken) {
+    return { pairAddress: "", volume24h: 0, liquidityUsd: 0, priceUsd: 0 };
+  }
+  const normalizedPair = normalizeToken(pairAddress);
+  const response = await fetch(`${dexscreenerApiBase}/${normalizedToken}`);
+  if (!response.ok) {
+    throw new Error(`DexScreener request failed: ${response.status}`);
+  }
+  const payload = await response.json();
+  const pairs = Array.isArray(payload && payload.pairs) ? payload.pairs : [];
+  const match = pairs.find((pair) => normalizeToken(pair.pairAddress) === normalizedPair)
+    || pairs.find((pair) => String(pair.chainId || "").toLowerCase() === "bsc")
+    || null;
+  if (!match) {
+    return { pairAddress: "", volume24h: 0, liquidityUsd: 0, priceUsd: 0 };
+  }
+  return {
+    pairAddress: match.pairAddress || "",
+    volume24h: Number(match.volume && match.volume.h24 ? match.volume.h24 : 0),
+    liquidityUsd: Number(match.liquidity && match.liquidity.usd ? match.liquidity.usd : 0),
+    priceUsd: Number(match.priceUsd || 0)
+  };
 }
 
 function readJsonBody(req, limit = 1_000_000) {
@@ -789,6 +816,13 @@ async function handleApi(req, res, url) {
     const interval = url.searchParams.get("interval") || "1m";
     const candles = await getCandlesStore(projectId, interval, token);
     return sendJson(res, 200, { candles });
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/pair-stats") {
+    const token = url.searchParams.get("token");
+    const pair = url.searchParams.get("pair");
+    const stats = await fetchDexPairStats(token, pair);
+    return sendJson(res, 200, stats);
   }
 
   if (req.method === "POST" && url.pathname === "/api/verify-token") {
