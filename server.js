@@ -11,11 +11,19 @@ if (!isMainThread) {
   const args = workerData;
   const suffix = String(args.suffix || "0000").toLowerCase().replace(/^0x/, "");
   const seed = args.seed;
+  const creatorBytes = Buffer.from(String(args.creator).replace(/^0x/, ""), "hex");
+  const launchpadBytes = Buffer.from(String(args.launchpadAddress).replace(/^0x/, ""), "hex");
+  const initCodeHashBytes = Buffer.from(String(args.initCodeHash).replace(/^0x/, ""), "hex");
+  const create2Prefix = Buffer.concat([Buffer.from("ff", "hex"), launchpadBytes]);
   for (let attempt = args.start; attempt < args.maxAttempts; attempt += args.step) {
     const userSalt = ethers.keccak256(ethers.toUtf8Bytes(`${seed}:${attempt}`));
-    const salt = ethers.keccak256(ethers.solidityPacked(["address", "bytes32"], [args.creator, userSalt]));
-    const predicted = ethers.getCreate2Address(args.launchpadAddress, salt, args.initCodeHash);
-    if (predicted.toLowerCase().endsWith(suffix)) {
+    const userSaltBytes = Buffer.from(userSalt.slice(2), "hex");
+    const salt = ethers.keccak256(Buffer.concat([creatorBytes, userSaltBytes]));
+    const saltBytes = Buffer.from(salt.slice(2), "hex");
+    const addressHash = ethers.keccak256(Buffer.concat([create2Prefix, saltBytes, initCodeHashBytes]));
+    const addressHex = `0x${addressHash.slice(-40)}`;
+    if (addressHex.endsWith(suffix)) {
+      const predicted = ethers.getAddress(addressHex);
       parentPort.postMessage({ userSalt, predicted, attempts: attempt + 1, suffix });
       process.exit(0);
     }
@@ -557,6 +565,23 @@ function predictTokenAddress(args) {
   return ethers.getCreate2Address(args.launchpadAddress, salt, initCodeHash);
 }
 
+function fastPredictTokenAddress(args) {
+  const ethers = getEthers();
+  const initCodeHash = args.initCodeHash || getLaunchpadTokenInitCodeHash(args);
+  const creatorBytes = Buffer.from(String(args.creator).replace(/^0x/, ""), "hex");
+  const userSaltBytes = Buffer.from(String(args.userSalt).replace(/^0x/, ""), "hex");
+  const launchpadBytes = Buffer.from(String(args.launchpadAddress).replace(/^0x/, ""), "hex");
+  const initCodeHashBytes = Buffer.from(String(initCodeHash).replace(/^0x/, ""), "hex");
+  const salt = ethers.keccak256(Buffer.concat([creatorBytes, userSaltBytes]));
+  const addressHash = ethers.keccak256(Buffer.concat([
+    Buffer.from("ff", "hex"),
+    launchpadBytes,
+    Buffer.from(salt.slice(2), "hex"),
+    initCodeHashBytes
+  ]));
+  return ethers.getAddress(`0x${addressHash.slice(-40)}`);
+}
+
 function findVanitySalt(args) {
   const ethers = getEthers();
   if (!ethers) {
@@ -575,7 +600,7 @@ function findVanitySalt(args) {
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const userSalt = ethers.keccak256(ethers.toUtf8Bytes(`${seed}:${attempt}`));
-    const predicted = predictTokenAddress({ ...args, userSalt, initCodeHash });
+    const predicted = fastPredictTokenAddress({ ...args, userSalt, initCodeHash });
     if (predicted.toLowerCase().endsWith(suffix)) {
       return { userSalt, predicted, attempts: attempt + 1, suffix };
     }
@@ -781,6 +806,7 @@ async function handleApi(req, res, url) {
 
   if (req.method === "POST" && url.pathname === "/api/vanity-salt") {
     const payload = await readJsonBody(req);
+    const startedAt = Date.now();
     const result = await findVanitySaltParallel({
       launchpadAddress: payload.launchpadAddress,
       creator: payload.creator,
@@ -791,6 +817,14 @@ async function handleApi(req, res, url) {
       suffix: payload.suffix || "0000",
       maxAttempts: payload.maxAttempts || 240000
     });
+    result.elapsedMs = Date.now() - startedAt;
+    console.log("vanity-salt", JSON.stringify({
+      suffix: result.suffix,
+      attempts: result.attempts,
+      workers: result.workers,
+      elapsedMs: result.elapsedMs,
+      predicted: result.predicted
+    }));
     return sendJson(res, 200, result);
   }
 

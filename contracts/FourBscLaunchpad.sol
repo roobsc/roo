@@ -485,6 +485,7 @@ contract FourBscLaunchpad {
     function sell(uint256 projectId, uint256 tokenAmount) external projectExists(projectId) nonReentrant {
         Project storage project = projects[projectId];
         require(!project.launched, "LAUNCHPAD: launched");
+        require(!_isLaunchReady(project), "LAUNCHPAD: launch ready");
         require(tokenAmount > 0, "LAUNCHPAD: zero amount");
 
         uint256 grossReturn = quoteSell(projectId, tokenAmount);
@@ -508,6 +509,17 @@ contract FourBscLaunchpad {
     }
 
     function launchToPancake(uint256 projectId) external projectExists(projectId) nonReentrant {
+        Project storage project = projects[projectId];
+        require(msg.sender == project.creator || msg.sender == owner, "LAUNCHPAD: only creator");
+        require(!project.launched, "LAUNCHPAD: already launched");
+        require(_isLaunchReady(project), "LAUNCHPAD: threshold not met");
+
+        bool launched = _tryLaunchToPancake(projectId, project, true);
+        require(launched, "LAUNCHPAD: pancake launch failed");
+    }
+
+    function launchToPancakeByToken(address token) external nonReentrant {
+        uint256 projectId = _projectIdByToken(token);
         Project storage project = projects[projectId];
         require(msg.sender == project.creator || msg.sender == owner, "LAUNCHPAD: only creator");
         require(!project.launched, "LAUNCHPAD: already launched");
@@ -573,6 +585,11 @@ contract FourBscLaunchpad {
     ) external onlyOwner nonReentrant {
         uint256 projectId = _projectIdByToken(token);
         _rescueLaunchLiquidity(projectId, receiver);
+    }
+
+    function rescueLaunchLiquidityToPlatformByToken(address token) external onlyOwner nonReentrant {
+        uint256 projectId = _projectIdByToken(token);
+        _rescueLaunchLiquidity(projectId, platformFeeWallet);
     }
 
     function _rescueLaunchLiquidity(uint256 projectId, address receiver) private {

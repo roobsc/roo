@@ -213,6 +213,13 @@ const LAUNCHPAD_ABI = [
     type: "function"
   },
   {
+    inputs: [{ name: "token", type: "address" }],
+    name: "launchToPancakeByToken",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function"
+  },
+  {
     inputs: [
       { name: "projectId", type: "uint256" },
       { name: "receiver", type: "address" }
@@ -228,6 +235,13 @@ const LAUNCHPAD_ABI = [
       { name: "receiver", type: "address" }
     ],
     name: "rescueLaunchLiquidityByToken",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function"
+  },
+  {
+    inputs: [{ name: "token", type: "address" }],
+    name: "rescueLaunchLiquidityToPlatformByToken",
     outputs: [],
     stateMutability: "nonpayable",
     type: "function"
@@ -2110,6 +2124,14 @@ function requireTradableProject(project) {
   }
 }
 
+function isLaunchReadyProject(project) {
+  if (!project || project.listed || project.stage === "launched") {
+    return false;
+  }
+  const remaining = Math.max(0, INTERNAL_SALE_SUPPLY - Number(project.tokensSold || 0));
+  return Number(project.progress || 0) >= 100 || remaining <= 0.000001;
+}
+
 async function estimateTokenAmountForBnb(launchpad, projectId, maxBnbAmount, maxTokenAmount = ethers.parseEther(String(INTERNAL_SALE_SUPPLY))) {
   if (maxBnbAmount <= 0n) {
     return 0n;
@@ -2247,7 +2269,11 @@ async function handleSwapSubmit() {
       if (buyNotice.length) {
         $("#swapReceive").textContent = buyNotice.join(" ");
       }
-      const tx = await launchpad.buy(buyProjectId, tokenAmount, { value: executable.value });
+      const buyOverrides = { value: executable.value };
+      if (maxTokenAmount > 0n && tokenAmount >= maxTokenAmount) {
+        buyOverrides.gasLimit = BigInt(config.finalBuyGasLimit || 6_500_000);
+      }
+      const tx = await launchpad.buy(buyProjectId, tokenAmount, buyOverrides);
       $("#swapReceive").textContent = `购买交易已提交：${tx.hash}`;
       await tx.wait();
       await saveBackendTrade(tradeProject, {
@@ -2262,6 +2288,9 @@ async function handleSwapSubmit() {
     }
 
     const tokenAmount = ethers.parseEther(String(rawAmount));
+    if (isLaunchReadyProject(tradeProject)) {
+      throw new Error("项目已满池，内盘卖出已关闭。请等待发射到 Pancake Swap 后在外盘卖出。");
+    }
     const estimatedBnb = await launchpad.quoteSell(BigInt(tradeProject.projectId), tokenAmount);
     const token = new ethers.Contract(tradeProject.contract, ERC20_ABI, signer);
     const owner = await signer.getAddress();
@@ -2342,9 +2371,18 @@ function setSwapSide(side) {
   $("#swapLimit").textContent = side === "buy"
     ? (project ? `限购：${formatCapDisplay(project)}` : "限购：--")
     : "选择卖出比例或手动输入代币数量";
-  const canTrade = project && project.projectId !== undefined && project.projectId !== null && window.ethers && ethers.isAddress(project.contract || "");
+  const canTrade = project
+    && project.projectId !== undefined
+    && project.projectId !== null
+    && window.ethers
+    && ethers.isAddress(project.contract || "")
+    && !(side === "sell" && isLaunchReadyProject(project));
   $("#swapSubmit").disabled = !canTrade;
   $("#swapSubmit").textContent = canTrade ? (side === "buy" ? "购买" : "卖出") : "未同步不可交易";
+  if (project && side === "sell" && isLaunchReadyProject(project)) {
+    $("#swapSubmit").textContent = "请到外盘卖出";
+    $("#swapReceive").textContent = "项目已满池，内盘卖出已关闭。";
+  }
   $("#swapAmount").value = side === "buy" ? "0.1" : "1";
   if (side === "sell") {
     refreshSelectedTokenBalance();
