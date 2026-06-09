@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
@@ -466,6 +466,42 @@
                 <div id="holdingTokenList" class="profile-list"></div>
               </section>
             </div>
+            <section id="ownerPanel" class="profile-card owner-panel" hidden>
+              <div class="owner-panel-head">
+                <div>
+                  <span class="eyebrow">Owner</span>
+                  <h2>平台 Owner 管理</h2>
+                </div>
+                <span class="owner-badge">Owner Only</span>
+              </div>
+              <div class="owner-panel-grid">
+                <label class="field">
+                  <span>发射台合约</span>
+                  <input id="ownerLaunchpadAddress" type="text" readonly />
+                </label>
+                <label class="field">
+                  <span>当前 Owner</span>
+                  <input id="ownerWalletAddress" type="text" readonly />
+                </label>
+                <label class="field full">
+                  <span>项目代币地址</span>
+                  <input id="ownerTokenAddress" type="text" placeholder="0x..." autocomplete="off" />
+                </label>
+                <label class="field full">
+                  <span>接收地址</span>
+                  <input id="ownerReceiverAddress" type="text" placeholder="0x..." autocomplete="off" />
+                </label>
+              </div>
+              <div class="owner-panel-actions">
+                <button id="ownerUseSelectedToken" class="ghost-action" type="button">使用当前代币</button>
+                <button id="ownerPauseExternalLp" class="ghost-action" type="button">暂停 LP 处理</button>
+                <button id="ownerResumeExternalLp" class="ghost-action" type="button">恢复 LP 处理</button>
+                <button id="ownerProcessExternalLp" class="primary-action" type="button">手动处理 LP</button>
+                <button id="ownerSweepExternalLp" class="ghost-action" type="button">清扫待处理税缓存</button>
+                <button id="ownerResetDividends" class="ghost-action" type="button">重置当前分红并转出</button>
+              </div>
+              <p id="ownerPanelStatus" class="owner-panel-status">仅平台 owner 可见并可操作。</p>
+            </section>
           </div>
         </section>
 

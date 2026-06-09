@@ -287,6 +287,53 @@ const LAUNCHPAD_ABI = [
   },
   {
     inputs: [],
+    name: "owner",
+    outputs: [{ name: "", type: "address" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [
+      { name: "token", type: "address" },
+      { name: "enabled", type: "bool" }
+    ],
+    name: "setProjectExternalLpProcessingByToken",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function"
+  },
+  {
+    inputs: [{ name: "token", type: "address" }],
+    name: "processProjectExternalLpByToken",
+    outputs: [{ name: "", type: "bool" }],
+    stateMutability: "nonpayable",
+    type: "function"
+  },
+  {
+    inputs: [
+      { name: "token", type: "address" },
+      { name: "receiver", type: "address" }
+    ],
+    name: "sweepProjectExternalLpFeesByToken",
+    outputs: [
+      { name: "", type: "uint256" },
+      { name: "", type: "uint256" }
+    ],
+    stateMutability: "nonpayable",
+    type: "function"
+  },
+  {
+    inputs: [
+      { name: "token", type: "address" },
+      { name: "receiver", type: "address" }
+    ],
+    name: "resetDividendsAndSweepByToken",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "nonpayable",
+    type: "function"
+  },
+  {
+    inputs: [],
     name: "MIN_LAUNCH_THRESHOLD",
     outputs: [{ name: "", type: "uint256" }],
     stateMutability: "view",
@@ -433,6 +480,8 @@ const PANCAKE_PAIR_ABI = [
 
 const state = {
   wallet: "",
+  launchpadOwner: "",
+  isLaunchpadOwner: false,
   cap: Number(config.defaultBuyCapTokens || 25),
   threshold: Number(config.defaultLaunchThresholdBnb || 5),
   avatarUrl: "",
@@ -478,6 +527,8 @@ let tradeCandleSeries = null;
 let tradeVolumeSeries = null;
 let tradeLineSeries = null;
 let tradeChartResizeObserver = null;
+let swapEstimateTimer = null;
+let swapEstimateRequestId = 0;
 const projectLaunchpadCache = new Map();
 
 const $ = (selector) => document.querySelector(selector);
@@ -1382,6 +1433,78 @@ function estimateInitialBuyTokens(bnbAmount, params) {
   return Math.max(0, Math.min(maxTokens, low));
 }
 
+function estimateCurvePoolCostLocal(tokenAmount, startSold, launchThreshold) {
+  const tokens = Number(tokenAmount || 0);
+  const sold = Number(startSold || 0);
+  const threshold = Number(launchThreshold || 0);
+  if (!Number.isFinite(tokens) || tokens <= 0 || !Number.isFinite(sold) || sold < 0 || !Number.isFinite(threshold) || threshold <= 0) {
+    return 0;
+  }
+  const supply = INTERNAL_SALE_SUPPLY;
+  const baseAmount = threshold * ((tokens * 0.5) / supply);
+  const slopeAmount = threshold * (((2 * sold * tokens) + (tokens * tokens)) / (2 * supply * supply));
+  return baseAmount + slopeAmount;
+}
+
+function estimateLocalBuyTokensFromProject(bnbAmount, project) {
+  const bnb = Number(bnbAmount || 0);
+  const launchThreshold = Number(project && project.launchThreshold || state.threshold || 0);
+  const startSold = Math.max(0, Number(project && project.tokensSold || 0));
+  if (!Number.isFinite(bnb) || bnb <= 0 || !Number.isFinite(launchThreshold) || launchThreshold <= 0) {
+    return 0;
+  }
+  const projectTaxBps = Number(project && project.projectTaxBps || 0);
+  const totalTaxBps = 100 + projectTaxBps;
+  const poolBudget = bnb * (10_000 - totalTaxBps) / 10_000;
+  const remaining = Math.max(0, INTERNAL_SALE_SUPPLY - startSold);
+  const cap = isWalletCapEnabled(project) ? Number(project.cap || 0) : remaining;
+  const maxTokens = Math.max(0, Math.min(cap || remaining, remaining));
+  if (maxTokens <= 0) {
+    return 0;
+  }
+  let low = 0;
+  let high = maxTokens;
+  for (let index = 0; index < 40; index += 1) {
+    const mid = (low + high) / 2;
+    const poolCost = estimateCurvePoolCostLocal(mid, startSold, launchThreshold);
+    if (poolCost <= poolBudget) {
+      low = mid;
+    } else {
+      high = mid;
+    }
+  }
+  return Math.max(0, Math.min(maxTokens, low));
+}
+
+function estimateLocalBuyCostFromProject(tokenAmount, project) {
+  const tokens = Number(tokenAmount || 0);
+  const launchThreshold = Number(project && project.launchThreshold || state.threshold || 0);
+  const startSold = Math.max(0, Number(project && project.tokensSold || 0));
+  const remaining = Math.max(0, INTERNAL_SALE_SUPPLY - startSold);
+  const cap = isWalletCapEnabled(project) ? Number(project.cap || 0) : remaining;
+  const maxTokens = Math.max(0, Math.min(cap || remaining, remaining));
+  if (!Number.isFinite(tokens) || tokens <= 0 || !Number.isFinite(launchThreshold) || launchThreshold <= 0 || maxTokens <= 0) {
+    return 0;
+  }
+  const clampedTokens = Math.max(0, Math.min(tokens, maxTokens));
+  const poolCost = estimateCurvePoolCostLocal(clampedTokens, startSold, launchThreshold);
+  const totalTaxBps = 100 + Number(project && project.projectTaxBps || 0);
+  const netBps = 10_000 - totalTaxBps;
+  if (netBps <= 0) {
+    return 0;
+  }
+  return poolCost * 10_000 / netBps;
+}
+
+function isLatestSwapEstimate(requestId, snapshot) {
+  return requestId === swapEstimateRequestId
+    && snapshot.swapSide === state.swapSide
+    && snapshot.buyInputMode === state.buyInputMode
+    && snapshot.swapAmount === normalizeDecimalInput($("#swapAmount").value)
+    && snapshot.buyTokenAmount === normalizeDecimalInput($("#buyTokenAmount").value)
+    && snapshot.projectContract === normalizeAddress(state.selectedProject && state.selectedProject.contract || "");
+}
+
 function formatCreatedTime(project) {
   const raw = project.createdAt || project.created_at || project.updatedAt || "";
   const time = raw ? Date.parse(raw) : Number.NaN;
@@ -2141,6 +2264,7 @@ async function refreshProfile() {
     renderProfileList("#createdTokenList", [], t("profileCreatedConnectEmpty"));
     renderProfileList("#tradedTokenList", [], t("profileTradedConnectEmpty"));
     renderProfileList("#holdingTokenList", [], t("profileHoldingConnectEmpty"));
+    await refreshOwnerPanel();
     return;
   }
 
@@ -2190,6 +2314,7 @@ async function refreshProfile() {
   renderProfileList("#createdTokenList", created, t("profileCreatedEmpty"));
   renderProfileList("#tradedTokenList", traded, t("profileTradedEmpty"));
   renderProfileList("#holdingTokenList", holdings, t("profileHoldingEmpty"));
+  await refreshOwnerPanel();
 }
 
 function openMenu() {
@@ -2553,74 +2678,104 @@ async function estimateSwapReceive() {
   }
   const swapAmountText = normalizeDecimalInput($("#swapAmount").value);
   const buyTokenAmountText = normalizeDecimalInput($("#buyTokenAmount").value);
+  const requestId = ++swapEstimateRequestId;
+  if (swapEstimateTimer) {
+    window.clearTimeout(swapEstimateTimer);
+    swapEstimateTimer = null;
+  }
   const amount = state.swapSide === "buy" && state.buyInputMode === "token"
     ? Math.max(0, Number(buyTokenAmountText || 0))
     : Math.max(0, Number(swapAmountText || 0));
-  try {
-    if (window.ethers && (swapAmountText || buyTokenAmountText)) {
+  if (state.swapSide === "buy") {
+    if (state.buyInputMode === "token") {
+      const estimatedCost = estimateLocalBuyCostFromProject(amount, project);
+      $("#swapAmount").value = estimatedCost > 0 ? estimatedCost.toFixed(6) : "";
+      $("#swapReceive").textContent = `预计支付: ${estimatedCost.toFixed(6)} BNB`;
+    } else {
+      const estimated = estimateLocalBuyTokensFromProject(amount, project);
+      $("#buyTokenAmount").value = estimated > 0 ? estimated.toFixed(6) : "";
+      $("#swapReceive").textContent = `您将收到: ${estimated.toFixed(6)} ${project.symbol}`;
+    }
+  } else {
+    const estimatedBnb = amount * Number(project.priceBnb || 0);
+    $("#swapReceive").textContent = `您将收到: ${estimatedBnb.toFixed(6)} BNB`;
+  }
+
+  const snapshot = {
+    projectContract: normalizeAddress(project.contract || ""),
+    swapSide: state.swapSide,
+    buyInputMode: state.buyInputMode,
+    swapAmount: swapAmountText,
+    buyTokenAmount: buyTokenAmountText
+  };
+
+  swapEstimateTimer = window.setTimeout(async () => {
+    try {
+      if (!window.ethers || (!swapAmountText && !buyTokenAmountText) || !isLatestSwapEstimate(requestId, snapshot)) {
+        return;
+      }
       const provider = window.ethereum
         ? new ethers.BrowserProvider(window.ethereum)
         : new ethers.JsonRpcProvider(config.rpcUrl || "https://bsc-dataseed.binance.org");
       const tradeProject = await ensureProjectLaunchpad(project, provider);
       const launchpad = getLaunchpadContract(provider, getProjectLaunchpadAddress(tradeProject));
+      if (!isLatestSwapEstimate(requestId, snapshot)) {
+        return;
+      }
       if (state.swapSide === "buy") {
         const capMaxTokenAmount = ethers.parseEther(String(isWalletCapEnabled(tradeProject) ? tradeProject.cap : INTERNAL_SALE_SUPPLY));
         const maxTokenAmount = await getBuySearchUpperBound(tradeProject, provider, capMaxTokenAmount);
+        if (!isLatestSwapEstimate(requestId, snapshot)) {
+          return;
+        }
         if (state.buyInputMode === "token") {
-          const parsedTokenInput = parsePositiveEtherInput(buyTokenAmountText);
+          const parsedTokenInput = parsePositiveEtherInput(snapshot.buyTokenAmount);
           if (!parsedTokenInput) {
             return;
           }
           let tokenAmount = parsedTokenInput.wei;
           if (tokenAmount > maxTokenAmount) {
             tokenAmount = maxTokenAmount;
-            $("#buyTokenAmount").value = Number(ethers.formatEther(tokenAmount)).toFixed(6);
           }
           const cost = await launchpad.quoteBuy(BigInt(tradeProject.projectId), tokenAmount);
+          if (!isLatestSwapEstimate(requestId, snapshot)) {
+            return;
+          }
+          $("#buyTokenAmount").value = Number(ethers.formatEther(tokenAmount)).toFixed(6);
           $("#swapAmount").value = Number(ethers.formatEther(cost)).toFixed(6);
           $("#swapReceive").textContent = `预计支付: ${Number(ethers.formatEther(cost)).toFixed(6)} BNB`;
           return;
         }
-        const parsedBnbInput = parsePositiveEtherInput(swapAmountText);
+        const parsedBnbInput = parsePositiveEtherInput(snapshot.swapAmount);
         if (!parsedBnbInput) {
           return;
         }
-        const bnbAmount = parsedBnbInput.wei;
-        const estimated = await estimateTokenAmountForBnb(launchpad, BigInt(tradeProject.projectId), bnbAmount, maxTokenAmount);
-        if (estimated > 0n) {
-          $("#buyTokenAmount").value = Number(ethers.formatEther(estimated)).toFixed(6);
-          $("#swapReceive").textContent = `您将收到: ${Number(ethers.formatEther(estimated)).toFixed(6)} ${project.symbol}`;
+        const estimated = await estimateTokenAmountForBnb(
+          launchpad,
+          BigInt(tradeProject.projectId),
+          parsedBnbInput.wei,
+          maxTokenAmount
+        );
+        if (!isLatestSwapEstimate(requestId, snapshot)) {
           return;
         }
-      } else {
-        const parsedSellInput = parsePositiveEtherInput(swapAmountText);
-        if (!parsedSellInput) {
-          return;
-        }
-        const tokenAmount = parsedSellInput.wei;
-        const estimatedBnb = await launchpad.quoteSell(BigInt(tradeProject.projectId), tokenAmount);
-        $("#swapReceive").textContent = `您将收到: ${Number(ethers.formatEther(estimatedBnb)).toFixed(6)} BNB`;
+        $("#buyTokenAmount").value = estimated > 0n ? Number(ethers.formatEther(estimated)).toFixed(6) : "";
+        $("#swapReceive").textContent = `您将收到: ${Number(ethers.formatEther(estimated)).toFixed(6)} ${project.symbol}`;
         return;
       }
+      const parsedSellInput = parsePositiveEtherInput(snapshot.swapAmount);
+      if (!parsedSellInput) {
+        return;
+      }
+      const estimatedBnb = await launchpad.quoteSell(BigInt(tradeProject.projectId), parsedSellInput.wei);
+      if (!isLatestSwapEstimate(requestId, snapshot)) {
+        return;
+      }
+      $("#swapReceive").textContent = `您将收到: ${Number(ethers.formatEther(estimatedBnb)).toFixed(6)} BNB`;
+    } catch {
+      // Keep the immediate local estimate if RPC reads are slow or fail.
     }
-  } catch {
-    // Fall back to the local estimate below if the RPC read fails.
-  }
-  if (state.swapSide === "buy") {
-    const price = Number(project.priceBnb || 0);
-    if (state.buyInputMode === "token") {
-      const estimatedCost = price > 0 ? amount * price : 0;
-      $("#swapAmount").value = estimatedCost > 0 ? estimatedCost.toFixed(6) : "";
-      $("#swapReceive").textContent = `预计支付: ${estimatedCost.toFixed(6)} BNB`;
-      return;
-    }
-    const estimated = price > 0 ? amount / price : 0;
-    $("#buyTokenAmount").value = estimated > 0 ? estimated.toFixed(6) : "";
-    $("#swapReceive").textContent = `您将收到: ${estimated.toFixed(6)} ${project.symbol}`;
-    return;
-  }
-  const estimatedBnb = amount * Number(project.priceBnb || 0);
-  $("#swapReceive").textContent = `您将收到: ${estimatedBnb.toFixed(6)} BNB`;
+  }, 180);
 }
 
 async function updateBuyCapQuote(project = state.selectedProject) {
@@ -2771,6 +2926,182 @@ async function pollVerificationStatus(chainId, guid) {
 
 function getLaunchpadContract(signerOrProvider, launchpadAddress = config.launchpadAddress) {
   return new ethers.Contract(launchpadAddress, LAUNCHPAD_ABI, signerOrProvider);
+}
+
+function setOwnerPanelStatus(message, tone = "") {
+  const status = $("#ownerPanelStatus");
+  if (!status) {
+    return;
+  }
+  status.textContent = message || "仅合约 owner 可执行这些管理操作。";
+  status.classList.toggle("success", tone === "success");
+  status.classList.toggle("error", tone === "error");
+}
+
+function setOwnerPanelButtonsEnabled(enabled) {
+  [
+    "#ownerPauseExternalLp",
+    "#ownerResumeExternalLp",
+    "#ownerProcessExternalLp",
+    "#ownerSweepExternalLp",
+    "#ownerResetDividends"
+  ].forEach((selector) => {
+    const button = $(selector);
+    if (!button) {
+      return;
+    }
+    button.disabled = !enabled;
+  });
+}
+
+function fillOwnerPanelTokenFromSelectedProject() {
+  const input = $("#ownerTokenAddress");
+  if (!input) {
+    return;
+  }
+  input.value = state.selectedProject && window.ethers && ethers.isAddress(state.selectedProject.contract || "")
+    ? state.selectedProject.contract
+    : "";
+}
+
+function getOwnerPanelTokenAddress() {
+  const input = $("#ownerTokenAddress");
+  const value = (input && input.value || "").trim();
+  if (window.ethers && ethers.isAddress(value)) {
+    return value;
+  }
+  const fallback = state.selectedProject && ethers.isAddress(state.selectedProject.contract || "")
+    ? state.selectedProject.contract
+    : "";
+  if (fallback) {
+    if (input) {
+      input.value = fallback;
+    }
+    return fallback;
+  }
+  throw new Error("请先填写有效的代币合约地址，或者先打开这个代币的交易页后再操作。");
+}
+
+function getOwnerPanelReceiverAddress() {
+  const input = $("#ownerReceiverAddress");
+  const fallback = hasConfiguredAddress(config.platformFeeWallet) ? config.platformFeeWallet : "";
+  const value = (input && input.value || fallback).trim();
+  if (window.ethers && ethers.isAddress(value)) {
+    if (input && !input.value.trim()) {
+      input.value = value;
+    }
+    return value;
+  }
+  throw new Error("请先填写有效的接收地址。");
+}
+
+async function refreshOwnerPanel() {
+  const panel = $("#ownerPanel");
+  if (!panel) {
+    return;
+  }
+
+  const launchpadInput = $("#ownerLaunchpadAddress");
+  const ownerInput = $("#ownerWalletAddress");
+  const receiverInput = $("#ownerReceiverAddress");
+  if (launchpadInput) {
+    launchpadInput.value = config.launchpadAddress || "";
+  }
+  if (receiverInput && !receiverInput.value && hasConfiguredAddress(config.platformFeeWallet)) {
+    receiverInput.value = config.platformFeeWallet;
+  }
+
+  if (!hasConfiguredAddress(config.launchpadAddress)) {
+    state.launchpadOwner = "";
+    state.isLaunchpadOwner = false;
+    panel.hidden = true;
+    if (ownerInput) {
+      ownerInput.value = "";
+    }
+    setOwnerPanelButtonsEnabled(false);
+    setOwnerPanelStatus("仅合约 owner 可执行这些管理操作。");
+    return;
+  }
+
+  if (!window.ethers || !window.ethereum) {
+    state.launchpadOwner = "";
+    state.isLaunchpadOwner = false;
+    panel.hidden = true;
+    if (ownerInput) {
+      ownerInput.value = "";
+    }
+    setOwnerPanelButtonsEnabled(false);
+    setOwnerPanelStatus("仅合约 owner 可执行这些管理操作。");
+    return;
+  }
+
+  try {
+    const provider = new ethers.BrowserProvider(window.ethereum);
+    const launchpad = getLaunchpadContract(provider);
+    const owner = await launchpad.owner();
+    state.launchpadOwner = owner || "";
+    state.isLaunchpadOwner = !!normalizeAddress(state.wallet) && normalizeAddress(owner) === normalizeAddress(state.wallet);
+    panel.hidden = !state.isLaunchpadOwner;
+    if (ownerInput) {
+      ownerInput.value = owner || "";
+    }
+    setOwnerPanelButtonsEnabled(state.isLaunchpadOwner);
+    if (state.isLaunchpadOwner) {
+      fillOwnerPanelTokenFromSelectedProject();
+      setOwnerPanelStatus("当前钱包就是合约 owner，可以操作 LP 处理和分红救援。", "success");
+    } else {
+      setOwnerPanelStatus("仅合约 owner 可执行这些管理操作。");
+    }
+  } catch (error) {
+    state.launchpadOwner = "";
+    state.isLaunchpadOwner = false;
+    panel.hidden = true;
+    if (ownerInput) {
+      ownerInput.value = "";
+    }
+    setOwnerPanelButtonsEnabled(false);
+    setOwnerPanelStatus("仅合约 owner 可执行这些管理操作。");
+  }
+}
+
+async function runOwnerPanelAction(button, action) {
+  if (!state.isLaunchpadOwner) {
+    setOwnerPanelStatus("当前钱包不是合约 owner。", "error");
+    return false;
+  }
+  if (!window.ethers || !window.ethereum) {
+    setOwnerPanelStatus("未检测到钱包，请先连接。", "error");
+    return false;
+  }
+
+  button.disabled = true;
+  const previousText = button.textContent;
+  button.textContent = "处理中...";
+  setOwnerPanelStatus("正在提交链上交易...");
+  try {
+    await ensureBscNetwork();
+    const { signer } = await getTradeSigner();
+    const launchpad = getLaunchpadContract(signer);
+    const tx = await action(launchpad);
+    setOwnerPanelStatus(`交易已提交：${tx.hash}`, "success");
+    await tx.wait();
+    setOwnerPanelStatus("链上操作已完成。", "success");
+    await refreshOwnerPanel();
+    if (state.selectedProject) {
+      await refreshTradeDividendInfo(state.selectedProject).catch(() => {});
+    }
+    await syncChainProjects().catch(() => {});
+    return true;
+  } catch (error) {
+    const message = error && (error.shortMessage || error.reason || error.message)
+      ? (error.shortMessage || error.reason || error.message)
+      : "Owner 操作失败。";
+    setOwnerPanelStatus(message, "error");
+    return false;
+  } finally {
+    button.disabled = false;
+    button.textContent = previousText;
+  }
 }
 
 async function getTradeSigner() {
@@ -3515,7 +3846,7 @@ async function connectWallet() {
   }
 
   await ensureBscNetwork();
-  refreshProfile();
+  await refreshProfile();
   return state.wallet;
 }
 
@@ -3642,24 +3973,12 @@ function parseProjectCreated(receipt, contract) {
 
 async function getLaunchThresholdArgument(launchpad, thresholdBnb) {
   const thresholdWei = ethers.parseEther(String(thresholdBnb));
-  try {
-    const minThreshold = await launchpad.MIN_LAUNCH_THRESHOLD();
-    if (minThreshold <= ethers.parseEther("0.05")) {
-      return thresholdWei;
-    }
-    if (thresholdWei < minThreshold) {
-      throw new Error(`当前发射台合约最低阈值是 ${ethers.formatEther(minThreshold)} BNB。0.05 BNB 测试需要先部署新版测试合约，并把 config.js 的 launchpadAddress 换成新地址。`);
-    }
-    return BigInt(String(thresholdBnb));
-  } catch (error) {
-    if (String(error.message || "").includes("新版测试合约")) {
-      throw error;
-    }
-    if (thresholdWei < ethers.parseEther("3")) {
-      throw new Error("当前发射台合约可能还是旧版本，最低 3 BNB。0.05 BNB 测试需要先部署新版测试合约，并更新 config.js 的 launchpadAddress。");
-    }
-    return BigInt(String(thresholdBnb));
+  const minThreshold = ethers.parseEther("0.05");
+  const maxThreshold = ethers.parseEther("8");
+  if (thresholdWei < minThreshold || thresholdWei > maxThreshold) {
+    throw new Error("创建阈值必须在 0.05 BNB 到 8 BNB 之间。");
   }
+  return thresholdWei;
 }
 
 async function verifyVanityWithLaunchpad(launchpad, params, vanity, wallet) {
@@ -3920,6 +4239,43 @@ function bindEvents() {
   $("#profileConnectButton").addEventListener("click", async () => {
     await connectWallet();
     await refreshProfile();
+  });
+  $("#ownerUseSelectedToken").addEventListener("click", () => {
+    fillOwnerPanelTokenFromSelectedProject();
+    setOwnerPanelStatus("已填入当前选中的代币地址。", "success");
+  });
+  $("#ownerPauseExternalLp").addEventListener("click", async (event) => {
+    await runOwnerPanelAction(event.currentTarget, async (launchpad) => launchpad.setProjectExternalLpProcessingByToken(
+      getOwnerPanelTokenAddress(),
+      false
+    ));
+  });
+  $("#ownerResumeExternalLp").addEventListener("click", async (event) => {
+    await runOwnerPanelAction(event.currentTarget, async (launchpad) => launchpad.setProjectExternalLpProcessingByToken(
+      getOwnerPanelTokenAddress(),
+      true
+    ));
+  });
+  $("#ownerProcessExternalLp").addEventListener("click", async (event) => {
+    await runOwnerPanelAction(event.currentTarget, async (launchpad) => launchpad.processProjectExternalLpByToken(
+      getOwnerPanelTokenAddress()
+    ));
+  });
+  $("#ownerSweepExternalLp").addEventListener("click", async (event) => {
+    await runOwnerPanelAction(event.currentTarget, async (launchpad) => launchpad.sweepProjectExternalLpFeesByToken(
+      getOwnerPanelTokenAddress(),
+      getOwnerPanelReceiverAddress()
+    ));
+  });
+  $("#ownerResetDividends").addEventListener("click", async (event) => {
+    const confirmed = window.confirm("这会清空当前所有地址的可领分红，并把当前未领取分红 BNB 转到接收地址。后续新分红仍会继续累计。是否继续？");
+    if (!confirmed) {
+      return;
+    }
+    await runOwnerPanelAction(event.currentTarget, async (launchpad) => launchpad.resetDividendsAndSweepByToken(
+      getOwnerPanelTokenAddress(),
+      getOwnerPanelReceiverAddress()
+    ));
   });
 
   $$("[data-open-create]").forEach((button) => {
@@ -4281,6 +4637,26 @@ function boot() {
   updateCreateState();
   bindEvents();
   setLanguage(state.language);
+  refreshOwnerPanel().catch(() => {});
+  if (window.ethereum && typeof window.ethereum.on === "function") {
+    window.ethereum.on("accountsChanged", async (accounts) => {
+      state.wallet = accounts && accounts[0] ? accounts[0] : "";
+      if (state.wallet) {
+        $("#connectButton").textContent = shortAddress(state.wallet);
+        $("#profileConnectButton").textContent = shortAddress(state.wallet);
+      } else {
+        $("#connectButton").textContent = t("connectWallet");
+        $("#profileConnectButton").textContent = t("connectWallet");
+      }
+      await refreshProfile().catch(() => {});
+    });
+    window.ethereum.on("chainChanged", async () => {
+      await refreshOwnerPanel().catch(() => {});
+      if (state.selectedProject) {
+        await refreshTradeDividendInfo(state.selectedProject).catch(() => {});
+      }
+    });
+  }
 }
 
 boot();
