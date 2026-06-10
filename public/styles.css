@@ -2207,6 +2207,10 @@ select {
   margin-top: 10px;
 }
 
+.trade-meta-row-mobile {
+  display: none;
+}
+
 .trade-meta-chip,
 .trade-meta-link {
   display: inline-flex;
@@ -3523,6 +3527,11 @@ select {
     display: block;
   }
 
+  .trade-modal[data-trade-view="swap"] .trade-meta-row-mobile {
+    display: flex;
+    margin: 0 0 12px;
+  }
+
   .trade-token-head,
   .trade-stats,
   .chart-toolbar {
@@ -3572,6 +3581,21 @@ select {
 
   .trade-chart-surface {
     height: 300px;
+  }
+
+  .trade-meta-row {
+    gap: 6px;
+  }
+
+  .trade-meta-chip,
+  .trade-meta-link,
+  .trade-meta-action {
+    min-height: 30px;
+    font-size: 11px;
+  }
+
+  .trade-meta-action {
+    padding: 0 12px;
   }
 }
 

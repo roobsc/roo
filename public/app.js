@@ -712,7 +712,8 @@ function hasDividendTaxEnabled(project) {
 
 function renderTradeMetaRow(project) {
   const container = $("#tradeMetaRow");
-  if (!container) {
+  const mobileContainer = $("#tradeMetaRowMobile");
+  if (!container && !mobileContainer) {
     return;
   }
   const metadata = project && project.metadata ? project.metadata : {};
@@ -776,8 +777,10 @@ function renderTradeMetaRow(project) {
     `);
   }
 
-  container.hidden = items.length === 0;
-  container.innerHTML = items.join("");
+  [container, mobileContainer].filter(Boolean).forEach((target) => {
+    target.hidden = items.length === 0;
+    target.innerHTML = items.join("");
+  });
 }
 
 async function handleClaimDividend() {
