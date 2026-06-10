@@ -507,6 +507,7 @@ const state = {
   mevProtection: false,
   slippagePercent: 15,
   selectedTokenBalance: 0,
+  selectedTokenBalanceWei: 0n,
   chainSyncing: false,
   rankingLoading: false,
   rankingMode: "marketCap",
@@ -1432,7 +1433,7 @@ function estimateInitialBuyTokens(bnbAmount, params) {
   let high = maxTokens;
   for (let index = 0; index < 80; index += 1) {
     const mid = (low + high) / 2;
-    const poolCost = launchThreshold * ((mid * 0.5) / supply + (mid * mid) / (supply * supply));
+    const poolCost = estimateCurvePoolCostLocal(mid, 0, launchThreshold);
     if (poolCost <= poolBudget) {
       low = mid;
     } else {
@@ -2982,6 +2983,7 @@ async function updateBuyCapQuote(project = state.selectedProject) {
 async function refreshSelectedTokenBalance() {
   const project = state.selectedProject;
   state.selectedTokenBalance = 0;
+  state.selectedTokenBalanceWei = 0n;
   $("#tokenBalanceText").textContent = project ? `余额 0 ${project.symbol}` : "余额 0 代币";
   if (
     !project
@@ -2998,6 +3000,7 @@ async function refreshSelectedTokenBalance() {
     const provider = new ethers.BrowserProvider(window.ethereum);
     const token = new ethers.Contract(project.contract, ERC20_ABI, provider);
     const balance = await token.balanceOf(state.wallet);
+    state.selectedTokenBalanceWei = balance;
     state.selectedTokenBalance = Number(ethers.formatEther(balance));
     $("#tokenBalanceText").textContent = `余额 ${state.selectedTokenBalance.toFixed(6)} ${project.symbol}`;
   } catch {
@@ -3196,6 +3199,65 @@ function decodeOwnerPanelError(error) {
     return "链上返回了自定义错误。请确认项目状态和按钮用途是否匹配。";
   }
   return rawMessage || "Owner 操作失败。";
+}
+
+function decodeTradeError(error) {
+  const rawMessage = error && (error.shortMessage || error.reason || error.message)
+    ? (error.shortMessage || error.reason || error.message)
+    : "";
+  const rawData = error && (
+    error.data
+    || (error.info && error.info.error && error.info.error.data)
+    || (error.error && error.error.data)
+  );
+  const data = String(rawData || "").toLowerCase();
+  const selector = data.slice(0, 10);
+  const argHex = data.length >= 74 ? data.slice(10, 74) : "";
+  const code = argHex ? Number.parseInt(argHex, 16) : Number.NaN;
+
+  if (selector === "0x9a4312d3") {
+    if (code === 12) {
+      return "这个项目已经发射到外盘，不能继续内盘交易。";
+    }
+    if (code === 13) {
+      return "请输入有效的买入或卖出数量。";
+    }
+    if (code === 14) {
+      return "当前输入数量超过内盘可交易范围。";
+    }
+    if (code === 15) {
+      return t("walletCapReached");
+    }
+    if (code === 16) {
+      return "BNB 数量不足，无法完成本次买入。";
+    }
+    if (code === 17) {
+      return "项目已达到发射条件，内盘卖出已关闭，请到外盘卖出。";
+    }
+    if (code === 18) {
+      return "当前卖出数量过大，内盘底池余额不足。";
+    }
+    if (code === 29) {
+      return "卖出数量超过当前内盘可卖数量，请减少数量后重试。";
+    }
+  }
+
+  if (selector === "0x34a51dc1") {
+    if (code === 3) {
+      return "授权额度不足，请重新授权后再卖出。";
+    }
+    if (code === 14) {
+      return "代币余额不足，100% 卖出时请刷新余额后重试。";
+    }
+    if (code === 17) {
+      return "外盘限购触发，当前钱包已超过该代币的外盘限购额度。";
+    }
+  }
+
+  if (String(rawMessage).toLowerCase().includes("unknown custom error")) {
+    return "链上返回了自定义错误，请刷新余额后重试。";
+  }
+  return rawMessage || "交易失败，请检查钱包和参数。";
 }
 
 async function refreshOwnerPanel() {
@@ -3444,7 +3506,11 @@ async function handleSwapSubmit() {
     const launchpad = getLaunchpadContract(signer, tradeLaunchpadAddress);
 
     if (state.swapSide === "buy") {
-      const capMaxTokenAmount = ethers.parseEther(String(isWalletCapEnabled(tradeProject) ? tradeProject.cap : INTERNAL_SALE_SUPPLY));
+      const remainingWalletCap = getRemainingWalletCap(tradeProject);
+      if (isWalletCapEnabled(tradeProject) && remainingWalletCap <= 0) {
+        throw new Error(t("walletCapReached"));
+      }
+      const capMaxTokenAmount = ethers.parseEther(String(isWalletCapEnabled(tradeProject) ? remainingWalletCap : INTERNAL_SALE_SUPPLY));
       const maxTokenAmount = await getBuySearchUpperBound(tradeProject, signer, capMaxTokenAmount);
       const buyProjectId = BigInt(tradeProject.projectId);
       const bnbInputAmount = state.buyInputMode === "bnb" ? parsedAmount.wei : 0n;
@@ -3540,10 +3606,8 @@ async function handleSwapSubmit() {
     });
     $("#swapReceive").textContent = `卖出成功，预估返回 ${ethers.formatEther(estimatedBnb)} BNB`;
     await refreshTradeData(tradeProject);
-  } catch (error) {
-    let message = error && (error.shortMessage || error.reason || error.message)
-      ? (error.shortMessage || error.reason || error.message)
-      : "交易失败，请检查钱包和参数。";
+} catch (error) {
+    let message = decodeTradeError(error);
     if (String(message).includes("LAUNCHPAD: sold out")) {
       message = "这个项目内盘已卖完，不能继续买入。";
     } else if (String(message).includes("LAUNCHPAD: wallet cap")) {
@@ -4722,8 +4786,12 @@ function bindEvents() {
       }
       await refreshSelectedTokenBalance();
       const percent = Number(button.dataset.sellPercent || 0);
-      const amount = (state.selectedTokenBalance * percent) / 100;
-      $("#swapAmount").value = amount > 0 ? amount.toFixed(6) : "0";
+      if (percent >= 100 && state.selectedTokenBalanceWei > 0n) {
+        $("#swapAmount").value = ethers.formatEther(state.selectedTokenBalanceWei);
+      } else {
+        const amount = (state.selectedTokenBalance * percent) / 100;
+        $("#swapAmount").value = amount > 0 ? amount.toFixed(6) : "0";
+      }
       estimateSwapReceive();
     });
   });
