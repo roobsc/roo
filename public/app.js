@@ -503,7 +503,6 @@ const state = {
   chartInterval: "1m",
   swapSide: "buy",
   buyInputMode: "bnb",
-  fastTradeMode: false,
   claimingDividend: false,
   mevProtection: false,
   slippagePercent: 15,
@@ -1604,163 +1603,6 @@ function toRoundedEtherWei(amount, fractionDigits = 12) {
   return ethers.parseEther(numeric.toFixed(fractionDigits));
 }
 
-function buildFastLocalBuyExecution(project, parsedAmount, slippageBps = 0n) {
-  const maxTokens = getLocalBuyMaxTokens(project);
-  if (maxTokens <= 0) {
-    return null;
-  }
-
-  let tokenAmount = 0;
-  let costBnb = 0;
-  let value = 0n;
-  const requestedValue = parsedAmount && parsedAmount.wei ? parsedAmount.wei : 0n;
-
-  if (state.buyInputMode === "token") {
-    const requestedTokens = Number(ethers.formatEther(parsedAmount.wei || 0n));
-    tokenAmount = Math.max(0, Math.min(requestedTokens, maxTokens));
-    costBnb = estimateLocalBuyCostFromProject(tokenAmount, project);
-    const costWei = toRoundedEtherWei(costBnb);
-    value = costWei + ((costWei * slippageBps) / 10000n);
-  } else {
-    const bnbAmount = Number(ethers.formatEther(parsedAmount.wei || 0n));
-    tokenAmount = estimateLocalBuyTokensFromProject(bnbAmount, project);
-    tokenAmount = Math.max(0, Math.min(tokenAmount, maxTokens));
-    costBnb = estimateLocalBuyCostFromProject(tokenAmount, project);
-    value = requestedValue;
-  }
-
-  const tokenAmountWei = toRoundedEtherWei(tokenAmount);
-  const costWei = toRoundedEtherWei(costBnb);
-  if (tokenAmountWei <= 0n || costWei <= 0n) {
-    return null;
-  }
-
-  return {
-    tokenAmount: tokenAmountWei,
-    cost: costWei,
-    value,
-    maxTokenAmount: toRoundedEtherWei(maxTokens)
-  };
-}
-
-async function resolveFastBuyExecution(tradeProject, launchpad, parsedAmount, slippageBps, launchpadAddress) {
-  const remainingWalletCap = getRemainingWalletCap(tradeProject);
-  if (isWalletCapEnabled(tradeProject) && remainingWalletCap <= 0) {
-    throw new Error(t("walletCapReached"));
-  }
-
-  const capMaxTokenAmount = ethers.parseEther(String(isWalletCapEnabled(tradeProject) ? remainingWalletCap : INTERNAL_SALE_SUPPLY));
-  const maxTokenAmount = await getBuySearchUpperBound(tradeProject, launchpad.runner, capMaxTokenAmount);
-  const buyProjectId = BigInt(tradeProject.projectId);
-
-  if (maxTokenAmount <= 0n) {
-    return null;
-  }
-
-  if (state.buyInputMode === "token") {
-    let tokenAmount = parsedAmount.wei;
-    if (tokenAmount > maxTokenAmount) {
-      tokenAmount = maxTokenAmount;
-    }
-    if (tokenAmount <= 0n) {
-      return null;
-    }
-    const cost = await quoteBuyCached(launchpad, buyProjectId, tokenAmount, launchpadAddress);
-    return {
-      executable: {
-        tokenAmount,
-        cost,
-        value: cost + ((cost * slippageBps) / 10000n)
-      },
-      maxTokenAmount
-    };
-  }
-
-  const budget = parsedAmount.wei;
-  if (budget <= 0n) {
-    return null;
-  }
-
-  const localExecution = buildFastLocalBuyExecution(tradeProject, parsedAmount, slippageBps);
-  let low = 0n;
-  let high = maxTokenAmount;
-  let bestAmount = 0n;
-
-  if (localExecution && localExecution.tokenAmount > 0n) {
-    const guessedAmount = localExecution.tokenAmount > maxTokenAmount ? maxTokenAmount : localExecution.tokenAmount;
-    const guessedCost = await quoteBuyCached(launchpad, buyProjectId, guessedAmount, launchpadAddress);
-    if (guessedCost <= budget) {
-      bestAmount = guessedAmount;
-      low = guessedAmount;
-    } else if (guessedAmount > 0n) {
-      high = guessedAmount - 1n;
-    }
-  }
-
-  while (low < high) {
-    const mid = (low + high + 1n) / 2n;
-    const cost = await quoteBuyCached(launchpad, buyProjectId, mid, launchpadAddress);
-    if (cost <= budget) {
-      bestAmount = mid;
-      low = mid;
-    } else {
-      high = mid - 1n;
-    }
-  }
-
-  if (bestAmount <= 0n) {
-    return null;
-  }
-
-  const cost = await quoteBuyCached(launchpad, buyProjectId, bestAmount, launchpadAddress);
-  return {
-    executable: {
-      tokenAmount: bestAmount,
-      cost,
-      value: cost
-    },
-    maxTokenAmount
-  };
-}
-
-function isUserRejectedError(error) {
-  const nestedCode = error && error.info && error.info.error ? error.info.error.code : undefined;
-  const code = Number(error && (error.code ?? nestedCode));
-  const message = String(error && (error.shortMessage || error.reason || error.message) || "").toLowerCase();
-  return code === 4001 || code === -32000 || message.includes("user rejected") || message.includes("user denied");
-}
-
-async function submitRawLaunchpadTransaction({ signer, launchpadAddress, method, args = [], value = 0n, gasLimit = 0n }) {
-  if (!window.ethereum || typeof window.ethereum.request !== "function") {
-    throw new Error("wallet request unsupported");
-  }
-  const from = await signer.getAddress();
-  const iface = new ethers.Interface(LAUNCHPAD_ABI);
-  const txRequest = {
-    from,
-    to: launchpadAddress,
-    data: iface.encodeFunctionData(method, args)
-  };
-  if (value > 0n) {
-    txRequest.value = ethers.toBeHex(value);
-  }
-  if (gasLimit > 0n) {
-    txRequest.gas = ethers.toBeHex(gasLimit);
-  }
-  const hash = await window.ethereum.request({
-    method: "eth_sendTransaction",
-    params: [txRequest]
-  });
-  if (!hash) {
-    throw new Error("wallet did not return tx hash");
-  }
-  const provider = signer.provider || getReadProvider();
-  return {
-    hash,
-    wait: async () => provider.waitForTransaction(hash)
-  };
-}
-
 async function resolveBuyExecutionSlow(tradeProject, launchpad, parsedAmount, slippageBps, launchpadAddress) {
   const remainingWalletCap = getRemainingWalletCap(tradeProject);
   if (isWalletCapEnabled(tradeProject) && remainingWalletCap <= 0) {
@@ -2182,7 +2024,6 @@ const translations = {
     tokenUnit: "枚",
     noWalletCap: "不限购",
     walletCapReached: "本钱包已达到该项目限购上限，无法继续买入。",
-    fastTradeMode: "极速模式",
     walletCapRemaining: "本钱包剩余可买 {amount} 枚",
     walletCapQuote: "{amount} 枚预计需要 {bnb} BNB",
     walletCapQuoteUnavailable: "{amount} 枚预计需要 -- BNB",
@@ -2369,7 +2210,6 @@ const translations = {
     tokenUnit: "tokens",
     noWalletCap: "No limit",
     walletCapReached: "This wallet has reached the buy limit for this project.",
-    fastTradeMode: "Fast mode",
     walletCapRemaining: "{amount} tokens remaining for this wallet",
     walletCapQuote: "{amount} tokens cost about {bnb} BNB",
     walletCapQuoteUnavailable: "{amount} tokens cost about -- BNB",
@@ -2793,10 +2633,6 @@ function setLanguage(lang) {
   }
   if (!state.avatarFileName) {
     $("#avatarFileName").textContent = t("noImageSelected");
-  }
-  const fastTradeLabel = $("#fastTradeModeLabel");
-  if (fastTradeLabel) {
-    fastTradeLabel.textContent = t("fastTradeMode");
   }
   updateTaxState();
   updateCreateState();
@@ -3989,180 +3825,6 @@ async function handleSwapSubmit() {
   }
 }
 
-async function handleSwapSubmitOptimized() {
-  const project = state.selectedProject;
-  const button = $("#swapSubmit");
-  if (isExternalTradeOnlyProject(project)) {
-    $("#swapReceive").textContent = getExternalTradeNotice();
-    window.alert(getExternalTradeNotice());
-    return;
-  }
-
-  try {
-    requireTradableProject(project);
-    const rawAmountText = state.swapSide === "buy" && state.buyInputMode === "token"
-      ? normalizeDecimalInput($("#buyTokenAmount").value)
-      : normalizeDecimalInput($("#swapAmount").value);
-    const parsedAmount = parsePositiveEtherInput(rawAmountText);
-    if (!parsedAmount) {
-      throw new Error("请输入买入或卖出数量。");
-    }
-
-    button.disabled = true;
-    button.textContent = state.swapSide === "buy" ? "购买中..." : "卖出中...";
-
-    const { signer } = await getTradeSigner();
-    const tradeProject = await ensureProjectLaunchpad(project, signer);
-    const tradeLaunchpadAddress = getProjectLaunchpadAddress(tradeProject);
-    const launchpad = getLaunchpadContract(signer, tradeLaunchpadAddress);
-
-    if (state.swapSide === "buy") {
-      const buyProjectId = BigInt(tradeProject.projectId);
-      const slippageBps = BigInt(Math.round(Number(state.slippagePercent || 0) * 100));
-      let resolved = await resolveFastBuyExecution(
-        tradeProject,
-        launchpad,
-        parsedAmount,
-        slippageBps,
-        tradeLaunchpadAddress
-      );
-      if (!resolved || !resolved.executable) {
-        resolved = await resolveBuyExecutionSlow(
-          tradeProject,
-          launchpad,
-          parsedAmount,
-          slippageBps,
-          tradeLaunchpadAddress
-        );
-      }
-      let executable = resolved && resolved.executable ? resolved.executable : null;
-      let maxTokenAmount = resolved && resolved.maxTokenAmount ? resolved.maxTokenAmount : 0n;
-      let tokenAmount = executable && executable.tokenAmount ? executable.tokenAmount : 0n;
-
-      if (!executable || tokenAmount <= 0n) {
-        throw new Error("这个项目内盘已卖完，不能继续买入。");
-      }
-
-      const buildBuyOverrides = (execution, finalCap) => ({
-        value: state.buyInputMode === "bnb" ? execution.cost : execution.value,
-        gasLimit: finalCap > 0n && execution.tokenAmount >= finalCap
-          ? BigInt(config.finalBuyGasLimit || 6_500_000)
-          : BigInt(config.internalBuyGasLimit || 1_500_000)
-      });
-
-      const buyNotice = [];
-      if (state.buyInputMode === "bnb" && parsedAmount.wei > executable.cost) {
-        buyNotice.push(`输入金额超过当前可成交额度，本次预计只扣除 ${Number(ethers.formatEther(executable.cost)).toFixed(6)} BNB，买入 ${Number(ethers.formatEther(tokenAmount)).toFixed(6)} ${project.symbol}。`);
-      }
-      if (maxTokenAmount > 0n && tokenAmount >= maxTokenAmount) {
-        buyNotice.push("这笔买入会买完当前可买代币，确认后将尝试自动发射到 Pancake Swap。");
-      }
-      if (buyNotice.length) {
-        $("#swapReceive").textContent = buyNotice.join(" ");
-      }
-
-      let tx;
-      const rawGasLimit = maxTokenAmount > 0n && executable.tokenAmount >= maxTokenAmount
-        ? BigInt(config.finalBuyGasLimit || 6_500_000)
-        : BigInt(config.internalBuyGasLimit || 1_500_000);
-      try {
-        tx = await submitRawLaunchpadTransaction({
-          signer,
-          launchpadAddress: tradeLaunchpadAddress,
-          method: "buy",
-          args: [buyProjectId, tokenAmount],
-          value: state.buyInputMode === "bnb" ? executable.cost : executable.value,
-          gasLimit: rawGasLimit
-        });
-      } catch (fastError) {
-        if (isUserRejectedError(fastError)) {
-          throw fastError;
-        }
-        const slowResolved = await resolveBuyExecutionSlow(
-          tradeProject,
-          launchpad,
-          parsedAmount,
-          slippageBps,
-          tradeLaunchpadAddress
-        );
-        executable = slowResolved && slowResolved.executable ? slowResolved.executable : null;
-        maxTokenAmount = slowResolved && slowResolved.maxTokenAmount ? slowResolved.maxTokenAmount : maxTokenAmount;
-        if (!executable || executable.tokenAmount <= 0n) {
-          throw fastError;
-        }
-        tokenAmount = executable.tokenAmount;
-        tx = await launchpad.buy(buyProjectId, tokenAmount, buildBuyOverrides(executable, maxTokenAmount));
-      }
-
-      $("#swapReceive").textContent = `购买交易已提交：${tx.hash}`;
-      await tx.wait();
-      clearProjectRuntimeCaches(tradeProject);
-      await saveBackendTrade(tradeProject, {
-        side: "buy",
-        txHash: tx.hash,
-        bnbAmount: Number(ethers.formatEther(executable.cost)),
-        tokenAmount: Number(ethers.formatEther(tokenAmount))
-      });
-      $("#swapReceive").textContent = `购买成功：${ethers.formatEther(tokenAmount)} ${project.symbol}`;
-      await refreshTradeData(tradeProject);
-      return;
-    }
-
-    const tokenAmount = parsedAmount.wei;
-    if (isLaunchReadyProject(tradeProject)) {
-      throw new Error("项目已满池，内盘卖出已关闭。请等待发射到 Pancake Swap 后在外盘卖出。");
-    }
-
-    const estimatedBnb = toRoundedEtherWei(Number(ethers.formatEther(tokenAmount)) * Number(tradeProject.priceBnb || 0), 12);
-    const token = new ethers.Contract(tradeProject.contract, ERC20_ABI, signer);
-    const owner = await signer.getAddress();
-    const allowance = await token.allowance(owner, tradeLaunchpadAddress);
-    if (allowance < tokenAmount) {
-      button.textContent = "授权中...";
-      const approveTx = await token.approve(
-        tradeLaunchpadAddress,
-        ethers.MaxUint256,
-        { gasLimit: BigInt(config.tokenApproveGasLimit || 120_000) }
-      );
-      $("#swapReceive").textContent = `授权交易已提交：${approveTx.hash}`;
-      await approveTx.wait();
-    }
-
-    button.textContent = "卖出中...";
-    const tx = await launchpad.sell(
-      BigInt(tradeProject.projectId),
-      tokenAmount,
-      { gasLimit: BigInt(config.internalSellGasLimit || 1_200_000) }
-    );
-    $("#swapReceive").textContent = `卖出交易已提交：${tx.hash}`;
-    await tx.wait();
-    clearProjectRuntimeCaches(tradeProject);
-    await saveBackendTrade(tradeProject, {
-      side: "sell",
-      txHash: tx.hash,
-      bnbAmount: Number(ethers.formatEther(estimatedBnb)),
-      tokenAmount: Number(ethers.formatEther(tokenAmount))
-    });
-    $("#swapReceive").textContent = `卖出成功，预计返回 ${ethers.formatEther(estimatedBnb)} BNB`;
-    await refreshTradeData(tradeProject);
-  } catch (error) {
-    let message = decodeTradeError(error);
-    if (String(message).includes("LAUNCHPAD: sold out")) {
-      message = "这个项目内盘已卖完，不能继续买入。";
-    } else if (String(message).includes("LAUNCHPAD: wallet cap")) {
-      message = "本钱包已达到该项目限购额度。";
-    } else if (String(message).includes("LAUNCHPAD: sell amount")) {
-      message = "卖出数量超过当前可卖数量，请减少数量或刷新余额后重试。";
-    } else if (String(message).includes("LAUNCHPAD: insufficient BNB")) {
-      message = "BNB 数量不足，请稍微提高滑点或减少买入数量。";
-    }
-    $("#swapReceive").textContent = message;
-  } finally {
-    button.disabled = false;
-    button.textContent = state.swapSide === "buy" ? "购买" : "卖出";
-  }
-};
-
 async function saveBackendTrade(project, trade) {
   const account = state.wallet || "";
   const priceBnb = trade.tokenAmount ? trade.bnbAmount / trade.tokenAmount : 0;
@@ -4436,9 +4098,6 @@ function openTradeModal(project) {
   state.selectedProject = project;
   state.buyInputMode = "token";
   setTradeView(window.matchMedia("(max-width: 840px)").matches ? "swap" : "chart");
-  if ($("#fastTradeModeInput")) {
-    $("#fastTradeModeInput").checked = state.fastTradeMode;
-  }
   const avatarMarkup = project.avatarUrl
     ? `<img src="${project.avatarUrl}" alt="">`
     : project.avatar;
@@ -5349,9 +5008,6 @@ function bindEvents() {
     state.mevProtection = event.target.checked;
     estimateSwapReceive();
   });
-  $("#fastTradeModeInput").addEventListener("change", (event) => {
-    state.fastTradeMode = event.target.checked;
-  });
   $("#slippageButton").addEventListener("click", () => {
     const next = window.prompt("设置滑点百分比 1-50", String(state.slippagePercent));
     if (next === null) {
@@ -5388,12 +5044,7 @@ function bindEvents() {
   $("#swapReverse").addEventListener("click", () => {
     setSwapSide(state.swapSide === "buy" ? "sell" : "buy", { announceExternal: true });
   });
-  $("#swapSubmit").addEventListener("click", () => {
-    if (state.fastTradeMode) {
-      return handleSwapSubmitOptimized();
-    }
-    return handleSwapSubmit();
-  });
+  $("#swapSubmit").addEventListener("click", handleSwapSubmit);
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !$("#tradeModal").hidden) {
