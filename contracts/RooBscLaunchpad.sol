@@ -762,7 +762,7 @@ contract FourBscLaunchpad {
 
         uint256 buyValue = _chargeCreateProtectionFee(projectId, msg.value);
         if (initialBuyTokenAmount > 0) {
-            _buyInternal(projectId, msg.sender, initialBuyTokenAmount, buyValue);
+            _buyInternal(projectId, msg.sender, initialBuyTokenAmount, buyValue, true);
         } else if (buyValue > 0) {
             _sendValue(msg.sender, buyValue);
         }
@@ -889,14 +889,15 @@ contract FourBscLaunchpad {
     }
 
     function buy(uint256 projectId, uint256 tokenAmount) external payable projectExists(projectId) nonReentrant {
-        _buyInternal(projectId, msg.sender, tokenAmount, msg.value);
+        _buyInternal(projectId, msg.sender, tokenAmount, msg.value, false);
     }
 
     function _buyInternal(
         uint256 projectId,
         address buyer,
         uint256 tokenAmount,
-        uint256 bnbProvided
+        uint256 bnbProvided,
+        bool ignoreWalletCap
     ) private projectExists(projectId) {
         Project storage project = projects[projectId];
         if (project.launched) revert LErr(12);
@@ -904,7 +905,7 @@ contract FourBscLaunchpad {
         uint256 burnAmount = _burnAmount(project, tokenAmount);
         if (project.tokensSold + tokenAmount > INTERNAL_SALE_SUPPLY) revert LErr(14);
         if (project.tokensSold + project.tokensBurned + tokenAmount + burnAmount > TOKEN_SUPPLY) revert LErr(14);
-        if (project.walletCap > 0) {
+        if (!ignoreWalletCap && project.walletCap > 0) {
             if (walletPurchased[projectId][buyer] + tokenAmount > project.walletCap) revert LErr(15);
         }
 
@@ -1035,8 +1036,16 @@ contract FourBscLaunchpad {
     ) external onlyOwner nonReentrant {
         uint256 projectId = _projectIdByToken(token);
         Project storage project = projects[projectId];
-        if (!project.launched) revert LErr(23);
-        LaunchpadToken(payable(project.token)).launchpadSweepPendingExternalLpFees(receiver);
+        if (receiver == address(0)) revert LErr(24);
+        if (project.launched) {
+            LaunchpadToken(payable(project.token)).launchpadSweepPendingExternalLpFees(receiver);
+            return;
+        }
+
+        uint256 bnbAmount = project.lpBnbBuffer;
+        if (bnbAmount == 0) revert LErr(22);
+        project.lpBnbBuffer = 0;
+        _sendValue(receiver, bnbAmount);
     }
 
     function resetDividendsAndSweepByToken(
@@ -1045,7 +1054,6 @@ contract FourBscLaunchpad {
     ) external onlyOwner nonReentrant {
         uint256 projectId = _projectIdByToken(token);
         Project storage project = projects[projectId];
-        if (!project.launched) revert LErr(23);
         LaunchpadToken(payable(project.token)).launchpadResetDividendsAndSweep(receiver);
     }
 

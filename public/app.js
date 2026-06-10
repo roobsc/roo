@@ -1457,7 +1457,7 @@ function estimateLocalBuyTokensFromProject(bnbAmount, project) {
   const totalTaxBps = 100 + projectTaxBps;
   const poolBudget = bnb * (10_000 - totalTaxBps) / 10_000;
   const remaining = Math.max(0, INTERNAL_SALE_SUPPLY - startSold);
-  const cap = isWalletCapEnabled(project) ? Number(project.cap || 0) : remaining;
+  const cap = isWalletCapEnabled(project) ? getRemainingWalletCap(project) : remaining;
   const maxTokens = Math.max(0, Math.min(cap || remaining, remaining));
   if (maxTokens <= 0) {
     return 0;
@@ -1481,7 +1481,7 @@ function estimateLocalBuyCostFromProject(tokenAmount, project) {
   const launchThreshold = Number(project && project.launchThreshold || state.threshold || 0);
   const startSold = Math.max(0, Number(project && project.tokensSold || 0));
   const remaining = Math.max(0, INTERNAL_SALE_SUPPLY - startSold);
-  const cap = isWalletCapEnabled(project) ? Number(project.cap || 0) : remaining;
+  const cap = isWalletCapEnabled(project) ? getRemainingWalletCap(project) : remaining;
   const maxTokens = Math.max(0, Math.min(cap || remaining, remaining));
   if (!Number.isFinite(tokens) || tokens <= 0 || !Number.isFinite(launchThreshold) || launchThreshold <= 0 || maxTokens <= 0) {
     return 0;
@@ -1526,6 +1526,15 @@ function parseLaunchThreshold(project) {
 
 function isWalletCapEnabled(project) {
   return Number(project && project.cap) > 0;
+}
+
+function getRemainingWalletCap(project) {
+  if (!isWalletCapEnabled(project)) {
+    return Number.POSITIVE_INFINITY;
+  }
+  const cap = Math.max(0, Number(project && project.cap || 0));
+  const balance = Math.max(0, Number(state.selectedTokenBalance || 0));
+  return Math.max(0, cap - balance);
 }
 
 function formatCapDisplay(project) {
@@ -1622,6 +1631,30 @@ function renderTradeTicker() {
   $("#tradeTickerTrack").innerHTML = items.length ? [...items, ...items].join("") : "";
 }
 
+function getProjectPageSize() {
+  const list = $("#projectList");
+  const isMobile = window.matchMedia("(max-width: 760px)").matches;
+  const minCardWidth = 315;
+  const gap = 16;
+  const rows = isMobile ? 4 : 3;
+  let columns = isMobile ? 1 : 3;
+
+  if (list) {
+    const templateColumns = window.getComputedStyle(list).gridTemplateColumns;
+    const parsedColumns = templateColumns
+      .split(" ")
+      .map((value) => value.trim())
+      .filter(Boolean).length;
+    if (parsedColumns > 0) {
+      columns = parsedColumns;
+    } else if (list.clientWidth > 0) {
+      columns = Math.max(1, Math.floor((list.clientWidth + gap) / (minCardWidth + gap)));
+    }
+  }
+
+  return Math.max(columns * rows, isMobile ? 6 : 9);
+}
+
 function renderProjects() {
   const list = $("#projectList");
   if (state.marketLoading) {
@@ -1629,7 +1662,7 @@ function renderProjects() {
     return;
   }
   const visibleProjects = getVisibleProjects();
-  const pageSize = window.matchMedia("(max-width: 760px)").matches ? 6 : 9;
+  const pageSize = getProjectPageSize();
   const totalPages = Math.max(1, Math.ceil(visibleProjects.length / pageSize));
   state.marketPage = Math.min(Math.max(1, Number(state.marketPage || 1)), totalPages);
   const pageProjects = visibleProjects.slice((state.marketPage - 1) * pageSize, state.marketPage * pageSize);
@@ -1783,6 +1816,11 @@ const translations = {
     manualWalletCap: "手动限购 1-100 枚",
     tokenUnit: "枚",
     noWalletCap: "不限购",
+    walletCapReached: "本钱包已达到该项目限购上限，无法继续买入。",
+    walletCapRemaining: "本钱包剩余可买 {amount} 枚",
+    walletCapQuote: "{amount} 枚预计需要 {bnb} BNB",
+    walletCapQuoteUnavailable: "{amount} 枚预计需要 -- BNB",
+    walletCapRemainingZero: "本钱包已达限购上限",
     devBuyModalTitle: "选择你想买入的代币数量",
     devBuyModalCopy: "创建代币时必须进行 dev 首买，创建和买入会在同一笔链上交易中完成，避免第二笔交易被抢跑。",
     devBuySwitchLabel: "以 BNB 买入",
@@ -1964,6 +2002,11 @@ const translations = {
     manualWalletCap: "Manual limit 1-100 tokens",
     tokenUnit: "tokens",
     noWalletCap: "No limit",
+    walletCapReached: "This wallet has reached the buy limit for this project.",
+    walletCapRemaining: "{amount} tokens remaining for this wallet",
+    walletCapQuote: "{amount} tokens cost about {bnb} BNB",
+    walletCapQuoteUnavailable: "{amount} tokens cost about -- BNB",
+    walletCapRemainingZero: "This wallet already reached the buy limit",
     devBuyModalTitle: "Choose your first-buy amount",
     devBuyModalCopy: "A dev first buy is required when creating a token. Creation and buy happen in the same on-chain transaction to prevent second-transaction sniping.",
     devBuySwitchLabel: "Buy with BNB",
@@ -2687,6 +2730,12 @@ async function estimateSwapReceive() {
     ? Math.max(0, Number(buyTokenAmountText || 0))
     : Math.max(0, Number(swapAmountText || 0));
   if (state.swapSide === "buy") {
+    const remainingWalletCap = getRemainingWalletCap(project);
+    if (isWalletCapEnabled(project) && remainingWalletCap <= 0) {
+      $("#buyTokenAmount").value = "";
+      $("#swapReceive").textContent = t("walletCapReached");
+      return;
+    }
     if (state.buyInputMode === "token") {
       const estimatedCost = estimateLocalBuyCostFromProject(amount, project);
       $("#swapAmount").value = estimatedCost > 0 ? estimatedCost.toFixed(6) : "";
@@ -2723,7 +2772,13 @@ async function estimateSwapReceive() {
         return;
       }
       if (state.swapSide === "buy") {
-        const capMaxTokenAmount = ethers.parseEther(String(isWalletCapEnabled(tradeProject) ? tradeProject.cap : INTERNAL_SALE_SUPPLY));
+        const remainingWalletCap = getRemainingWalletCap(tradeProject);
+        if (isWalletCapEnabled(tradeProject) && remainingWalletCap <= 0) {
+          $("#buyTokenAmount").value = "";
+          $("#swapReceive").textContent = t("walletCapReached");
+          return;
+        }
+        const capMaxTokenAmount = ethers.parseEther(String(isWalletCapEnabled(tradeProject) ? remainingWalletCap : INTERNAL_SALE_SUPPLY));
         const maxTokenAmount = await getBuySearchUpperBound(tradeProject, provider, capMaxTokenAmount);
         if (!isLatestSwapEstimate(requestId, snapshot)) {
           return;
@@ -2788,6 +2843,50 @@ async function updateBuyCapQuote(project = state.selectedProject) {
     return;
   }
   element.hidden = false;
+  if (!isWalletCapEnabled(project)) {
+    element.textContent = t("noWalletCap");
+    return;
+  }
+  const remainingWalletCap = Math.max(0, getRemainingWalletCap(project));
+  const capText = remainingWalletCap.toFixed(6).replace(/\.?0+$/, "");
+  if (remainingWalletCap <= 0) {
+    element.textContent = t("walletCapRemainingZero");
+    return;
+  }
+  element.textContent = t("walletCapQuoteUnavailable").replace("{amount}", capText);
+  try {
+    if (
+      project.projectId === undefined
+      || project.projectId === null
+      || !window.ethers
+      || !ethers.isAddress(project.contract || "")
+    ) {
+      throw new Error("not tradable");
+    }
+    const provider = window.ethereum
+      ? new ethers.BrowserProvider(window.ethereum)
+      : new ethers.JsonRpcProvider(config.rpcUrl || "https://bsc-dataseed.binance.org");
+    const tradeProject = await ensureProjectLaunchpad(project, provider);
+    const launchpad = getLaunchpadContract(provider, getProjectLaunchpadAddress(tradeProject));
+    const cost = await launchpad.quoteBuy(BigInt(tradeProject.projectId), ethers.parseEther(String(remainingWalletCap)));
+    const formattedCost = Number(ethers.formatEther(cost)).toFixed(6);
+    element.textContent = t("walletCapQuote")
+      .replace("{amount}", capText)
+      .replace("{bnb}", formattedCost);
+    if (
+      state.swapSide === "buy"
+      && state.buyInputMode === "token"
+      && Number($("#buyTokenAmount").value || 0) === remainingWalletCap
+    ) {
+      $("#swapAmount").value = formattedCost;
+    }
+  } catch {
+    const estimated = Number(project.priceBnb || 0) * remainingWalletCap;
+    element.textContent = t("walletCapQuote")
+      .replace("{amount}", capText)
+      .replace("{bnb}", estimated > 0 ? estimated.toFixed(6) : "--");
+  }
+  return;
   if (!isWalletCapEnabled(project)) {
     element.textContent = "不限购";
     return;
@@ -2995,6 +3094,50 @@ function getOwnerPanelReceiverAddress() {
   throw new Error("请先填写有效的接收地址。");
 }
 
+function decodeOwnerPanelError(error) {
+  const rawMessage = error && (error.shortMessage || error.reason || error.message)
+    ? (error.shortMessage || error.reason || error.message)
+    : "";
+  const rawData = error && (
+    error.data
+    || (error.info && error.info.error && error.info.error.data)
+    || (error.error && error.error.data)
+  );
+  const data = String(rawData || "").toLowerCase();
+  const selector = data.slice(0, 10);
+  const argHex = data.length >= 74 ? data.slice(10, 74) : "";
+  const code = argHex ? Number.parseInt(argHex, 16) : Number.NaN;
+
+  if (selector === "0x9a4312d3") {
+    if (code === 22) {
+      return "当前没有可补救的 LP / BNB 缓存。";
+    }
+    if (code === 23) {
+      return "当前项目还没发射，这个按钮只适用于外盘 LP 处理。内盘补救请使用“清扫待处理税缓存”。";
+    }
+    if (code === 24) {
+      return "接收地址无效。";
+    }
+    if (code === 26) {
+      return "这个代币地址不在当前发射台合约里。";
+    }
+  }
+
+  if (selector === "0x34a51dc1") {
+    if (code === 11) {
+      return "接收地址无效。";
+    }
+    if (code === 12) {
+      return "BNB 转出失败，请检查接收地址。";
+    }
+  }
+
+  if (String(rawMessage).toLowerCase().includes("unknown custom error")) {
+    return "链上返回了自定义错误。请确认项目状态和按钮用途是否匹配。";
+  }
+  return rawMessage || "Owner 操作失败。";
+}
+
 async function refreshOwnerPanel() {
   const panel = $("#ownerPanel");
   if (!panel) {
@@ -3096,7 +3239,7 @@ async function runOwnerPanelAction(button, action) {
     const message = error && (error.shortMessage || error.reason || error.message)
       ? (error.shortMessage || error.reason || error.message)
       : "Owner 操作失败。";
-    setOwnerPanelStatus(message, "error");
+    setOwnerPanelStatus(decodeOwnerPanelError(error), "error");
     return false;
   } finally {
     button.disabled = false;
