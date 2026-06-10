@@ -503,6 +503,7 @@ const state = {
   chartInterval: "1m",
   swapSide: "buy",
   buyInputMode: "bnb",
+  fastTradeMode: false,
   claimingDividend: false,
   mevProtection: false,
   slippagePercent: 15,
@@ -2070,6 +2071,7 @@ const translations = {
     tokenUnit: "枚",
     noWalletCap: "不限购",
     walletCapReached: "本钱包已达到该项目限购上限，无法继续买入。",
+    fastTradeMode: "极速模式",
     walletCapRemaining: "本钱包剩余可买 {amount} 枚",
     walletCapQuote: "{amount} 枚预计需要 {bnb} BNB",
     walletCapQuoteUnavailable: "{amount} 枚预计需要 -- BNB",
@@ -2256,6 +2258,7 @@ const translations = {
     tokenUnit: "tokens",
     noWalletCap: "No limit",
     walletCapReached: "This wallet has reached the buy limit for this project.",
+    fastTradeMode: "Fast mode",
     walletCapRemaining: "{amount} tokens remaining for this wallet",
     walletCapQuote: "{amount} tokens cost about {bnb} BNB",
     walletCapQuoteUnavailable: "{amount} tokens cost about -- BNB",
@@ -2679,6 +2682,10 @@ function setLanguage(lang) {
   }
   if (!state.avatarFileName) {
     $("#avatarFileName").textContent = t("noImageSelected");
+  }
+  const fastTradeLabel = $("#fastTradeModeLabel");
+  if (fastTradeLabel) {
+    fastTradeLabel.textContent = t("fastTradeMode");
   }
   updateTaxState();
   updateCreateState();
@@ -4319,6 +4326,9 @@ function openTradeModal(project) {
   state.selectedProject = project;
   state.buyInputMode = "token";
   setTradeView(window.matchMedia("(max-width: 840px)").matches ? "swap" : "chart");
+  if ($("#fastTradeModeInput")) {
+    $("#fastTradeModeInput").checked = state.fastTradeMode;
+  }
   const avatarMarkup = project.avatarUrl
     ? `<img src="${project.avatarUrl}" alt="">`
     : project.avatar;
@@ -5229,6 +5239,9 @@ function bindEvents() {
     state.mevProtection = event.target.checked;
     estimateSwapReceive();
   });
+  $("#fastTradeModeInput").addEventListener("change", (event) => {
+    state.fastTradeMode = event.target.checked;
+  });
   $("#slippageButton").addEventListener("click", () => {
     const next = window.prompt("设置滑点百分比 1-50", String(state.slippagePercent));
     if (next === null) {
@@ -5265,7 +5278,12 @@ function bindEvents() {
   $("#swapReverse").addEventListener("click", () => {
     setSwapSide(state.swapSide === "buy" ? "sell" : "buy", { announceExternal: true });
   });
-  $("#swapSubmit").addEventListener("click", handleSwapSubmit);
+  $("#swapSubmit").addEventListener("click", () => {
+    if (state.fastTradeMode) {
+      return handleSwapSubmitOptimized();
+    }
+    return handleSwapSubmit();
+  });
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !$("#tradeModal").hidden) {

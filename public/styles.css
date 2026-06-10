@@ -2530,11 +2530,23 @@ select {
   gap: 12px;
 }
 
+.swap-toggles {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
 .mev-toggle {
   display: inline-flex;
   align-items: center;
   gap: 9px;
   font-weight: 900;
+}
+
+.mev-toggle em {
+  font-style: normal;
 }
 
 .mev-toggle input {
@@ -3483,6 +3495,21 @@ select {
 
   .swap-panel {
     padding: 16px;
+  }
+
+  .swap-topline {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .swap-toggles {
+    width: 100%;
+    justify-content: space-between;
+    gap: 10px 14px;
+  }
+
+  .mev-toggle {
+    font-size: 12px;
   }
 
   .swap-tabs {
