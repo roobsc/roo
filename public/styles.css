@@ -2022,17 +2022,20 @@ select {
 }
 
 .trade-close {
-  position: sticky;
-  top: 12px;
-  float: right;
-  z-index: 4;
-  width: 36px;
-  height: 36px;
-  margin: 12px 12px -48px 0;
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 8;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  margin: 0;
   border: 1px solid rgba(0, 240, 255, 0.22);
   border-radius: 50%;
   color: var(--text-accent);
-  background: var(--bg-surface);
+  background: rgba(17, 19, 26, 0.92);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.36);
   font-size: 24px;
   line-height: 1;
 }
@@ -2042,6 +2045,7 @@ select {
   grid-template-columns: minmax(0, 1fr) 360px;
   gap: 24px;
   padding: 24px;
+  padding-top: 62px;
 }
 
 .trade-section-tabs {
@@ -2628,8 +2632,7 @@ select {
   font-weight: 900;
 }
 
-.swap-input button,
-.route-button {
+.swap-input button {
   border: 0;
   color: var(--text-secondary);
   background: transparent;
@@ -2720,15 +2723,6 @@ select {
   cursor: not-allowed;
   color: #8d8174;
   background: #2a2420;
-}
-
-.route-button {
-  width: 100%;
-  margin-top: 10px;
-  padding: 12px;
-  border: 1px solid rgba(0, 240, 255, 0.14);
-  border-radius: var(--radius-sm);
-  background: var(--bg-surface);
 }
 
 .bonding-head strong {
@@ -3445,8 +3439,16 @@ select {
     max-height: calc(100vh - 20px);
   }
 
+  .trade-close {
+    top: 12px;
+    right: 12px;
+    width: 36px;
+    height: 36px;
+  }
+
   .trade-layout {
     padding: 14px;
+    padding-top: 56px;
     display: flex;
     flex-direction: column;
     gap: 14px;
@@ -3456,8 +3458,9 @@ select {
     order: -2;
     position: sticky;
     top: 0;
-    z-index: 5;
+    z-index: 4;
     gap: 8px;
+    margin-right: 40px;
     padding: 6px;
     background: rgba(10, 11, 14, 0.94);
     backdrop-filter: blur(16px);

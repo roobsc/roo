@@ -4727,13 +4727,19 @@ function bindEvents() {
 
   $("#tradeContract").addEventListener("click", copyTradeContract);
   $("#copyTradeContract").addEventListener("click", copyTradeContract);
-  $("#tradeMetaRow").addEventListener("click", async (event) => {
-    const claimButton = event.target.closest("[data-claim-dividend]");
-    if (!claimButton) {
+  ["#tradeMetaRow", "#tradeMetaRowMobile"].forEach((selector) => {
+    const container = $(selector);
+    if (!container) {
       return;
     }
-    event.preventDefault();
-    await handleClaimDividend();
+    container.addEventListener("click", async (event) => {
+      const claimButton = event.target.closest("[data-claim-dividend]");
+      if (!claimButton) {
+        return;
+      }
+      event.preventDefault();
+      await handleClaimDividend();
+    });
   });
 
   $$(".swap-tabs button").forEach((button) => {
