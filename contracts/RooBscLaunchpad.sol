@@ -33,7 +33,7 @@ error LErr(uint8 code);
 
 /**
  * @title LaunchpadToken
- * @notice Minimal BEP20/ERC20 token used by FourBscLaunchpad projects.
+ * @notice Minimal BEP20/ERC20 token used by RooBscLaunchpad projects.
  * The launchpad mints the fixed 10,000 token supply to itself on creation.
  */
 contract LaunchpadToken {
@@ -598,7 +598,7 @@ contract LaunchpadToken {
 }
 
 /**
- * @title FourBscLaunchpad
+ * @title RooBscLaunchpad
  * @notice BSC meme launchpad prototype:
  * - Fixed project supply: 10,000 tokens.
  * - Creator chooses one-wallet buy cap from 1 to 100 tokens.
@@ -608,7 +608,7 @@ contract LaunchpadToken {
  * - Project mechanism tax pays marketing in BNB, auto-pays holder dividends, and returns LP tax to the pool.
  * - Burn allocation sends project tokens to the dead wallet while keeping total supply fixed.
  */
-contract FourBscLaunchpad {
+contract RooBscLaunchpad {
     uint256 private constant TOKEN_SUPPLY = 10_000 ether;
     uint256 private constant INTERNAL_SALE_SUPPLY = 8_000 ether;
     uint256 private constant LAUNCH_SOLD_FLOOR = 7_999 ether;

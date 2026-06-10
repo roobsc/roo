@@ -227,7 +227,7 @@ function compileLaunchpad(solc, contractPath) {
     }
   }
 
-  const contract = output.contracts["RooBscLaunchpad.sol"].FourBscLaunchpad;
+  const contract = output.contracts["RooBscLaunchpad.sol"].RooBscLaunchpad;
   const abi = contract.abi;
   const bytecode = `0x${contract.evm.bytecode.object}`;
   const deployedBytecode = `0x${contract.evm.deployedBytecode.object}`;
