@@ -540,8 +540,9 @@ function buildStandardJsonInput() {
     settings: {
       optimizer: {
         enabled: true,
-        runs: 200
+        runs: 1
       },
+      viaIR: true,
       outputSelection: {
         "*": {
           "*": ["abi", "evm.bytecode", "evm.deployedBytecode", "metadata"]
@@ -722,7 +723,7 @@ async function submitTokenVerification(args) {
   form.set("contractname", "contracts/RooBscLaunchpad.sol:LaunchpadToken");
   form.set("compilerversion", "v0.8.24+commit.e11b9ed9");
   form.set("optimizationUsed", "1");
-  form.set("runs", "200");
+  form.set("runs", "1");
   form.set("constructorArguments", encodeLaunchpadTokenConstructor(args));
   form.set("evmVersion", "default");
   form.set("licenseType", "3");
