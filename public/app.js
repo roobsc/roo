@@ -898,9 +898,18 @@ async function refreshProjectHolderCounts(limit = 80) {
   await Promise.all(candidates.map(async (project) => {
     try {
       const data = await apiGet(`/api/trades?projectId=${encodeURIComponent(project.projectId)}&token=${encodeURIComponent(project.contract || "")}`);
-      const holderCount = computeHoldersFromTrades(data.trades || []).length;
-      if (Number(project.holders || 0) !== holderCount) {
+      const trades = data.trades || [];
+      const holderCount = computeHoldersFromTrades(trades).length;
+      let nextChange = computeProjectTradeChange(trades, Number(project.priceBnb || 0));
+      if (project.listed || project.stage === "launched") {
+        const pairStats = await loadPairStats(project.contract, project.pairAddress || "");
+        if (pairStats && Number.isFinite(Number(pairStats.priceChange24h))) {
+          nextChange = Number(pairStats.priceChange24h);
+        }
+      }
+      if (Number(project.holders || 0) !== holderCount || Number(project.change || 0) !== Number(nextChange || 0)) {
         project.holders = holderCount;
+        project.change = nextChange;
         apiPost("/api/projects/upsert", project).catch(() => {});
       }
     } catch {
@@ -1245,6 +1254,7 @@ async function syncChainProjects(limit = 120) {
   } finally {
     state.chainSyncing = false;
   }
+  await refreshProjectHolderCounts();
 }
 
 async function findProjectByTokenAddress(tokenAddress) {
@@ -1417,8 +1427,7 @@ function estimateInitialBuyTokens(bnbAmount, params) {
   const totalTaxBps = 100 + projectTaxBps;
   const poolBudget = bnb * (10_000 - totalTaxBps) / 10_000;
   const supply = INTERNAL_SALE_SUPPLY;
-  const cap = params.walletCapEnabled ? Number(params.maxWalletBuyTokens || 0) : supply;
-  const maxTokens = Math.max(0, Math.min(cap || supply, supply));
+  const maxTokens = supply;
   let low = 0;
   let high = maxTokens;
   for (let index = 0; index < 80; index += 1) {
@@ -1539,6 +1548,56 @@ function getRemainingWalletCap(project) {
 
 function formatCapDisplay(project) {
   return isWalletCapEnabled(project) ? `${Number(project.cap)} ${t("tokenUnit")}` : t("noWalletCap");
+}
+
+function computePercentChange(currentPrice, previousPrice) {
+  const current = Number(currentPrice || 0);
+  const previous = Number(previousPrice || 0);
+  if (!Number.isFinite(current) || !Number.isFinite(previous) || current <= 0 || previous <= 0) {
+    return 0;
+  }
+  return ((current - previous) / previous) * 100;
+}
+
+function computeProjectTradeChange(trades = [], currentPrice = 0) {
+  if (!Array.isArray(trades) || !trades.length) {
+    return 0;
+  }
+  const sorted = [...trades]
+    .filter((trade) => Number(trade.priceBnb || 0) > 0)
+    .sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0));
+  if (!sorted.length) {
+    return 0;
+  }
+  const latestPrice = Number(currentPrice || sorted[sorted.length - 1].priceBnb || 0);
+  const latestTime = Number(sorted[sorted.length - 1].timestamp || 0);
+  const baselineCutoff = latestTime > 0 ? latestTime - 24 * 60 * 60 * 1000 : 0;
+  const baselineTrade = sorted.find((trade) => Number(trade.timestamp || 0) >= baselineCutoff) || sorted[0];
+  return computePercentChange(latestPrice, Number(baselineTrade && baselineTrade.priceBnb || 0));
+}
+
+function formatSignedPercent(value, digits = 2) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number)) {
+    return "+0%";
+  }
+  const rounded = Number(number.toFixed(digits));
+  const text = Math.abs(rounded) < 0.005 ? "0" : Math.abs(rounded).toFixed(digits).replace(/\.?0+$/, "");
+  if (rounded > 0) {
+    return `+${text}%`;
+  }
+  if (rounded < 0) {
+    return `-${text}%`;
+  }
+  return `${rounded < 0 ? "-" : "+"}${text}%`;
+}
+
+function getChangeBadgeClass(value) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number) || Math.abs(number) < 0.005) {
+    return "flat";
+  }
+  return number > 0 ? "up" : "down";
 }
 
 function computeHoldersFromTrades(trades = []) {
@@ -1695,7 +1754,7 @@ function renderProjects() {
             <h3>${project.symbol}</h3>
             <span class="token-kind">${project.name} / BSC</span>
           </div>
-          <strong class="change-badge">+${project.change}%</strong>
+          <strong class="change-badge ${getChangeBadgeClass(project.change)}">${formatSignedPercent(project.change)}</strong>
         </div>
         <dl class="project-facts">
           <div>
@@ -2184,7 +2243,8 @@ async function readPancakeMarketData(project, provider, bnbUsd = BNB_USD_FALLBAC
     priceBnb,
     marketCap,
     liquidityUsd: Number(pairStats && pairStats.liquidityUsd ? pairStats.liquidityUsd : liquidityUsd),
-    volume24h: Number(pairStats && pairStats.volume24h ? pairStats.volume24h : project.volume24h || 0)
+    volume24h: Number(pairStats && pairStats.volume24h ? pairStats.volume24h : project.volume24h || 0),
+    change: Number(pairStats && Number.isFinite(pairStats.priceChange24h) ? pairStats.priceChange24h : project.change || 0)
   };
 }
 
@@ -3590,6 +3650,13 @@ function updateTradeStats(project, trades = []) {
     .replace("{remaining}", remaining.toLocaleString(undefined, { maximumFractionDigits: 3 }))
     .replace("{symbol}", project.symbol)
     .replace("{raised}", project.raised);
+
+  const nextChange = (project.listed || project.stage === "launched")
+    ? Number(project.change || 0)
+    : computeProjectTradeChange(trades, summary.priceBnb);
+  project.change = nextChange;
+  $("#tradeChange").textContent = formatSignedPercent(nextChange);
+  $("#tradeChange").className = getChangeBadgeClass(nextChange);
 }
 
 function setTradeView(view) {
@@ -3671,6 +3738,15 @@ async function refreshTradeData(project) {
     renderTradeTable(project, trades);
     renderHolderList(project, trades);
     updateTradeStats(project, trades);
+    const index = projects.findIndex((item) => normalizeAddress(item.contract) === normalizeAddress(project.contract));
+    if (index >= 0) {
+      projects[index] = { ...projects[index], holders: project.holders, change: project.change };
+      if (state.selectedProject && normalizeAddress(state.selectedProject.contract) === normalizeAddress(project.contract)) {
+        state.selectedProject = projects[index];
+      }
+      renderProjects();
+      apiPost("/api/projects/upsert", projects[index]).catch(() => {});
+    }
     drawTradeChart(project, candles);
     await refreshTradeDividendInfo(project);
   } catch {
@@ -3699,7 +3775,8 @@ async function refreshOpenTradeProjectFromChain(project) {
     }
     state.selectedProject = freshProject;
     $("#tradeCreator").textContent = `${t("creatorLabelFull")} ${freshProject.creator}`;
-    $("#tradeChange").textContent = `+${freshProject.change}%`;
+    $("#tradeChange").textContent = formatSignedPercent(freshProject.change);
+    $("#tradeChange").className = getChangeBadgeClass(freshProject.change);
     const displayProgress = getDisplayProgress(freshProject);
     $("#bondingValue").textContent = `${displayProgress}%`;
     $("#bondingBar").style.width = `${displayProgress}%`;
@@ -3734,7 +3811,8 @@ function openTradeModal(project) {
   $("#copyTradeContract").dataset.address = contractAddress;
   $("#copyTradeContract").textContent = t("copyButton");
   $("#tradeCreator").textContent = `${t("creatorLabelFull")} ${project.creator}`;
-  $("#tradeChange").textContent = `+${project.change}%`;
+  $("#tradeChange").textContent = formatSignedPercent(project.change);
+  $("#tradeChange").className = getChangeBadgeClass(project.change);
   renderTradeMetaRow(project);
   updateTradeStats(project, []);
   const displayProgress = getDisplayProgress(project);

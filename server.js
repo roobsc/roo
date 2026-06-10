@@ -360,7 +360,7 @@ function sendJson(res, status, data) {
 async function fetchDexPairStats(token, pairAddress = "") {
   const normalizedToken = normalizeToken(token);
   if (!normalizedToken) {
-    return { pairAddress: "", volume24h: 0, liquidityUsd: 0, priceUsd: 0 };
+    return { pairAddress: "", volume24h: 0, liquidityUsd: 0, priceUsd: 0, priceChange24h: 0 };
   }
   const normalizedPair = normalizeToken(pairAddress);
   const response = await fetch(`${dexscreenerApiBase}/${normalizedToken}`);
@@ -373,13 +373,14 @@ async function fetchDexPairStats(token, pairAddress = "") {
     || pairs.find((pair) => String(pair.chainId || "").toLowerCase() === "bsc")
     || null;
   if (!match) {
-    return { pairAddress: "", volume24h: 0, liquidityUsd: 0, priceUsd: 0 };
+    return { pairAddress: "", volume24h: 0, liquidityUsd: 0, priceUsd: 0, priceChange24h: 0 };
   }
   return {
     pairAddress: match.pairAddress || "",
     volume24h: Number(match.volume && match.volume.h24 ? match.volume.h24 : 0),
     liquidityUsd: Number(match.liquidity && match.liquidity.usd ? match.liquidity.usd : 0),
-    priceUsd: Number(match.priceUsd || 0)
+    priceUsd: Number(match.priceUsd || 0),
+    priceChange24h: Number(match.priceChange && match.priceChange.h24 ? match.priceChange.h24 : 0)
   };
 }
 

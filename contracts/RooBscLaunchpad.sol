@@ -918,7 +918,9 @@ contract FourBscLaunchpad {
         project.bnbRaised += poolAmount;
         project.tokensSold += tokenAmount;
         project.tokensBurned += burnAmount;
-        walletPurchased[projectId][buyer] += tokenAmount;
+        if (!ignoreWalletCap) {
+            walletPurchased[projectId][buyer] += tokenAmount;
+        }
 
         _sendValue(platformFeeWallet, platformTax);
         _processProjectBnbTax(projectId, project, grossCost);
