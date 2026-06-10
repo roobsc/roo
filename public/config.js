@@ -1,7 +1,7 @@
 window.LAUNCHPAD_CONFIG = {
   chainId: 56,
   chainName: "BNB Smart Chain",
-  launchpadAddress: "0xE4074Ee488E28EAe6c4d238E21C4474A013500eC",
+  launchpadAddress: "0x120D78B298Fac5EbEe069De1B54daFf77A4463C2",
   legacyLaunchpadAddresses: [
     "0xa14eBf2B1FB47047b2ec85CaEFaa2898a24f7DdA",
     "0x1f1039B46039E235300104e04E4346836589C339",
