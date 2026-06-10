@@ -41,6 +41,17 @@ const launchpadSourcePath = path.join(root, "contracts", "RooBscLaunchpad.sol");
 const launchpadTokenBinPath = path.join(root, "build-vanity", "contracts_RooBscLaunchpad_sol_LaunchpadToken.bin");
 const bscscanApiUrl = process.env.BSCSCAN_API_URL || "https://api.etherscan.io/v2/api";
 const bscscanApiKey = process.env.BSCSCAN_API_KEY || "";
+const verificationSourceCandidates = [
+  "contracts/RooBscLaunchpad.sol",
+  "RooBscLaunchpad.sol",
+  "contracts/FourBscLaunchpad.sol",
+  "FourBscLaunchpad.sol",
+  "browser/RooBscLaunchpad.sol",
+  "browser/FourBscLaunchpad.sol"
+].map((sourceKey) => ({
+  sourceKey,
+  contractName: `${sourceKey}:LaunchpadToken`
+}));
 const postgresUrl = process.env.POSTGRES_URL || process.env.DATABASE_URL || "";
 const blobToken = process.env.BLOB_READ_WRITE_TOKEN || "";
 const maxAvatarBytes = 2 * 1024 * 1024;
@@ -528,12 +539,12 @@ function getEthers() {
   }
 }
 
-function buildStandardJsonInput() {
+function buildStandardJsonInput(sourceKey = "contracts/RooBscLaunchpad.sol") {
   const source = fs.readFileSync(launchpadSourcePath, "utf8");
   return JSON.stringify({
     language: "Solidity",
     sources: {
-      "contracts/RooBscLaunchpad.sol": {
+      [sourceKey]: {
         content: source
       }
     },
@@ -562,6 +573,33 @@ function encodeLaunchpadTokenConstructor(args) {
     ["string", "string", "uint256", "address"],
     [args.tokenName, args.tokenSymbol, args.supply, args.launchpadAddress]
   ).replace(/^0x/, "");
+}
+
+function parseVerificationApiResponse(response, text) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = { raw: text };
+  }
+  return {
+    ok: response.ok,
+    status: response.status,
+    data
+  };
+}
+
+function isAcceptedVerificationResponse(result) {
+  const data = result && result.data ? result.data : {};
+  const message = String(data.result || data.message || "").toLowerCase();
+  if (String(data.status || "") === "1") {
+    return true;
+  }
+  return message.includes("already verified")
+    || message.includes("source code already verified")
+    || message.includes("pending in queue")
+    || message.includes("already pending")
+    || message.includes("pass - verified");
 }
 
 function readLaunchpadTokenBytecode() {
@@ -716,36 +754,52 @@ async function submitTokenVerification(args) {
   requestUrl.searchParams.set("module", "contract");
   requestUrl.searchParams.set("action", "verifysourcecode");
 
-  const form = new URLSearchParams();
-  form.set("contractaddress", args.contractAddress);
-  form.set("sourceCode", buildStandardJsonInput());
-  form.set("codeformat", "solidity-standard-json-input");
-  form.set("contractname", "contracts/RooBscLaunchpad.sol:LaunchpadToken");
-  form.set("compilerversion", "v0.8.24+commit.e11b9ed9");
-  form.set("optimizationUsed", "1");
-  form.set("runs", "1");
-  form.set("constructorArguments", encodeLaunchpadTokenConstructor(args));
-  form.set("evmVersion", "default");
-  form.set("licenseType", "3");
+  const attempts = [];
+  for (const candidate of verificationSourceCandidates) {
+    const form = new URLSearchParams();
+    form.set("contractaddress", args.contractAddress);
+    form.set("sourceCode", buildStandardJsonInput(candidate.sourceKey));
+    form.set("codeformat", "solidity-standard-json-input");
+    form.set("contractname", candidate.contractName);
+    form.set("compilerversion", "v0.8.24+commit.e11b9ed9");
+    form.set("optimizationUsed", "1");
+    form.set("runs", "1");
+    form.set("constructorArguments", encodeLaunchpadTokenConstructor(args));
+    form.set("evmVersion", "default");
+    form.set("licenseType", "3");
 
-  const response = await fetch(requestUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded"
-    },
-    body: form
-  });
-  const text = await response.text();
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    data = { raw: text };
+    const response = await fetch(requestUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: form
+    });
+    const text = await response.text();
+    const result = parseVerificationApiResponse(response, text);
+    attempts.push({
+      sourceKey: candidate.sourceKey,
+      contractName: candidate.contractName,
+      response: result.data
+    });
+    if (isAcceptedVerificationResponse(result)) {
+      return {
+        ...result,
+        sourceKey: candidate.sourceKey,
+        contractName: candidate.contractName,
+        attempts
+      };
+    }
   }
+
+  const lastAttempt = attempts[attempts.length - 1] || null;
   return {
-    ok: response.ok,
-    status: response.status,
-    data
+    ok: false,
+    status: 200,
+    data: lastAttempt ? lastAttempt.response : { message: "No verification attempts were made" },
+    sourceKey: lastAttempt ? lastAttempt.sourceKey : "",
+    contractName: lastAttempt ? lastAttempt.contractName : "",
+    attempts
   };
 }
 
@@ -771,17 +825,7 @@ async function checkVerificationStatus(args) {
     }
   });
   const text = await response.text();
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    data = { raw: text };
-  }
-  return {
-    ok: response.ok,
-    status: response.status,
-    data
-  };
+  return parseVerificationApiResponse(response, text);
 }
 
 async function handleApi(req, res, url) {
