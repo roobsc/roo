@@ -4,7 +4,9 @@
   "version": "0.1.0",
   "description": "BSC limited-purchase meme launchpad prototype",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "deploy:launchpad": "node scripts/deploy-launchpad.js",
+    "check:rpc": "node scripts/check-rpc.js"
   },
   "dependencies": {
     "@vercel/blob": "^2.4.0",

@@ -50,6 +50,7 @@ contract LaunchpadToken {
     address private externalLpPair;
     address private externalLpReceiver;
     address private externalMarketingWallet;
+    uint256 private externalWalletCap;
     uint16 private externalProjectTaxBps;
     uint16 private externalMarketingBps;
     uint16 private externalBurnBps;
@@ -176,6 +177,7 @@ contract LaunchpadToken {
         address pair,
         address receiver,
         address marketingWallet,
+        uint256 walletCap,
         uint16 projectTaxBps,
         uint16 marketingBps,
         uint16 burnBps,
@@ -197,6 +199,7 @@ contract LaunchpadToken {
         externalLpPair = pair;
         externalLpReceiver = receiver;
         externalMarketingWallet = marketingWallet;
+        externalWalletCap = walletCap;
         externalProjectTaxBps = projectTaxBps;
         externalMarketingBps = marketingBps;
         externalBurnBps = burnBps;
@@ -284,6 +287,15 @@ contract LaunchpadToken {
             uint256 lpTokenAmount
         ) = _takeExternalProjectFee(from, to, amount);
         uint256 receivedAmount = amount - totalFeeAmount;
+
+        if (
+            externalWalletCap > 0
+            && from == externalLpPair
+            && to != externalLpReceiver
+            && _balances[to] + receivedAmount > externalWalletCap
+        ) {
+            revert TErr(17);
+        }
 
         unchecked {
             _balances[from] = balance - amount;
@@ -1070,6 +1082,7 @@ contract FourBscLaunchpad {
             pair,
             launchLpReceiver,
             project.marketingWallet,
+            project.walletCap,
             project.projectTaxBps,
             project.taxAllocation.marketingBps,
             project.taxAllocation.burnBps,

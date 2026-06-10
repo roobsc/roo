@@ -1,8 +1,11 @@
 node_modules/
 build/
 build-check/
+build-check-external-cap/
+build-check-external-tax/
 build-check-final/
 build-optimized/
+build-size-check-runs*/
 *.log
 server-*.cmd.log
 server-*.out.log
@@ -14,3 +17,4 @@ server-*.err.log
 dist/
 coverage/
 tmp/
+tmp-solc-*.json

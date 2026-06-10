@@ -30,6 +30,42 @@ npm start
 http://127.0.0.1:4301
 ```
 
+## 本地部署发射台合约
+
+如果 Remix 看不到 `viaIR` 开关，可以直接用项目里的脚本本地部署。
+
+1. 复制 `.env.example` 为 `.env`
+2. 填写这些变量：
+
+```text
+BSC_RPC_URL=
+BSC_RPC_URLS=
+DEPLOYER_PRIVATE_KEY=
+PLATFORM_FEE_WALLET=
+PANCAKE_ROUTER=
+SOLC_MODULE_PATH=
+RPC_TIMEOUT_MS=
+```
+
+说明：
+- `BSC_RPC_URLS` 可填多个 RPC，用英文逗号分隔；脚本会按顺序自动尝试
+- `PANCAKE_ROUTER` 不填时默认用 BSC Pancake V2 Router
+- `SOLC_MODULE_PATH` 一般可以留空；只有本机找不到 `solc` 时再填本地 `solc` 模块路径
+- `RPC_TIMEOUT_MS` 默认 `30000`
+
+3. 运行部署：
+
+```bash
+npm run deploy:launchpad
+```
+
+脚本会自动使用：
+- `solc 0.8.24`
+- `optimizer runs=1`
+- `viaIR=true`
+
+部署成功后会直接打印新的 `launchpadAddress`，把它填到 `public/config.js` 即可。
+
 ## 自动开源
 
 创建代币成功后，前端会调用后端 `/api/verify-token` 自动向 BscScan 提交 `LaunchpadToken` 源码验证。
