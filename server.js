@@ -70,10 +70,12 @@ const mimeTypes = {
   ".css": "text/css; charset=utf-8",
   ".js": "application/javascript; charset=utf-8",
   ".svg": "image/svg+xml; charset=utf-8",
+  ".ico": "image/x-icon",
   ".png": "image/png",
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
-  ".webp": "image/webp"
+  ".webp": "image/webp",
+  ".webmanifest": "application/manifest+json; charset=utf-8"
 };
 
 function ensureDb() {
