@@ -2206,6 +2206,20 @@ function t(key) {
     || key;
 }
 
+function getExternalTradeNotice() {
+  return state.language === "en"
+    ? "This token is already live on Pancake Swap. Please trade it on the external market."
+    : "代币已上线Pancake，请在外盘进行买卖。";
+}
+
+function getExternalTradeButtonLabel() {
+  return state.language === "en" ? "Trade on Pancake" : "请到外盘交易";
+}
+
+function isExternalTradeOnlyProject(project) {
+  return Boolean(project && (project.listed || project.stage === "launched"));
+}
+
 function getRankingProvider() {
   if (!window.ethers) {
     return null;
@@ -2771,6 +2785,13 @@ function chartIntervalToMs(interval) {
 
 async function estimateSwapReceive() {
   const project = state.selectedProject;
+  if (isExternalTradeOnlyProject(project)) {
+    $("#swapSubmit").disabled = true;
+    $("#swapSubmit").textContent = getExternalTradeButtonLabel();
+    $("#swapLimit").textContent = getExternalTradeNotice();
+    $("#swapReceive").textContent = getExternalTradeNotice();
+    return;
+  }
   if (!project) {
     return;
   }
@@ -2796,7 +2817,6 @@ async function estimateSwapReceive() {
   if (state.swapSide === "buy") {
     const remainingWalletCap = getRemainingWalletCap(project);
     if (isWalletCapEnabled(project) && remainingWalletCap <= 0) {
-      $("#buyTokenAmount").value = "";
       $("#swapReceive").textContent = t("walletCapReached");
       return;
     }
@@ -2838,7 +2858,6 @@ async function estimateSwapReceive() {
       if (state.swapSide === "buy") {
         const remainingWalletCap = getRemainingWalletCap(tradeProject);
         if (isWalletCapEnabled(tradeProject) && remainingWalletCap <= 0) {
-          $("#buyTokenAmount").value = "";
           $("#swapReceive").textContent = t("walletCapReached");
           return;
         }
@@ -3389,6 +3408,9 @@ async function getTradeSigner() {
 }
 
 function requireTradableProject(project) {
+  if (isExternalTradeOnlyProject(project)) {
+    throw new Error(getExternalTradeNotice());
+  }
   if (!project || project.projectId === undefined || project.projectId === null || !window.ethers || !ethers.isAddress(project.contract || "")) {
     throw new Error("这个项目还没有同步到链上 projectId，暂时不能交易。");
   }
@@ -3494,6 +3516,11 @@ async function findExecutableBuyQuote(
 async function handleSwapSubmit() {
   const project = state.selectedProject;
   const button = $("#swapSubmit");
+  if (isExternalTradeOnlyProject(project)) {
+    $("#swapReceive").textContent = getExternalTradeNotice();
+    window.alert(getExternalTradeNotice());
+    return;
+  }
   try {
     requireTradableProject(project);
     const rawAmountText = state.swapSide === "buy" && state.buyInputMode === "token"
@@ -3649,7 +3676,8 @@ async function saveBackendTrade(project, trade) {
   });
 }
 
-function setSwapSide(side) {
+function setSwapSide(side, options = {}) {
+  const announceExternal = Boolean(options.announceExternal);
   state.swapSide = side;
   if (side !== "buy") {
     state.buyInputMode = "bnb";
@@ -3657,17 +3685,52 @@ function setSwapSide(side) {
   $$(".swap-tabs button").forEach((button) => {
     button.classList.toggle("active", button.dataset.swapSide === side);
   });
+
   const project = state.selectedProject;
-  $("#swapUnit").textContent = side === "buy" ? "BNB" : (project ? project.symbol : "代币");
+  const symbol = project ? project.symbol : "TOKEN";
+
+  $("#swapUnit").textContent = side === "buy" ? "BNB" : symbol;
   $("#buyTokenInputWrap").hidden = side !== "buy";
-  $("#buyTokenUnit").textContent = project ? project.symbol : "代币";
+  $("#buyTokenUnit").textContent = symbol;
   $(".quick-amounts").hidden = side === "sell";
   $("#sellPercentages").hidden = side !== "sell";
   $("#swapAmount").step = side === "buy" ? "0.01" : "0.000001";
-  $("#swapAmount").placeholder = side === "buy" ? "输入 BNB 数量" : `输入 ${project ? project.symbol : "代币"} 数量`;
+  $("#swapAmount").placeholder = side === "buy" ? "输入 BNB 数量" : `输入 ${symbol} 数量`;
+
+  if (isExternalTradeOnlyProject(project)) {
+    $("#swapAmount").disabled = true;
+    $("#buyTokenAmount").disabled = true;
+    $("#swapReverse").disabled = true;
+    $$(".quick-amounts button").forEach((button) => {
+      button.disabled = true;
+    });
+    $$("#sellPercentages button").forEach((button) => {
+      button.disabled = true;
+    });
+    $("#swapSubmit").disabled = true;
+    $("#swapSubmit").textContent = getExternalTradeButtonLabel();
+    $("#swapLimit").textContent = getExternalTradeNotice();
+    $("#swapReceive").textContent = getExternalTradeNotice();
+    if (announceExternal) {
+      window.alert(getExternalTradeNotice());
+    }
+    return;
+  }
+
+  $("#swapAmount").disabled = false;
+  $("#buyTokenAmount").disabled = false;
+  $("#swapReverse").disabled = false;
+  $$(".quick-amounts button").forEach((button) => {
+    button.disabled = false;
+  });
+  $$("#sellPercentages button").forEach((button) => {
+    button.disabled = false;
+  });
+
   $("#swapLimit").textContent = side === "buy"
-    ? (project ? `限购：${formatCapDisplay(project)}` : "限购：--")
+    ? (project ? `限购: ${formatCapDisplay(project)}` : "限购: -")
     : "选择卖出比例或手动输入代币数量";
+
   const canTrade = project
     && project.projectId !== undefined
     && project.projectId !== null
@@ -3680,6 +3743,7 @@ function setSwapSide(side) {
     $("#swapSubmit").textContent = "请到外盘卖出";
     $("#swapReceive").textContent = "项目已满池，内盘卖出已关闭。";
   }
+
   $("#swapAmount").value = side === "buy" ? "0.1" : "1";
   if (side === "sell") {
     refreshSelectedTokenBalance();
@@ -3687,7 +3751,6 @@ function setSwapSide(side) {
   updateBuyCapQuote(project);
   estimateSwapReceive();
 }
-
 function getTradeSummary(project, trades = []) {
   const volumeBnb = trades.reduce((sum, trade) => sum + Number(trade.bnbAmount || 0), 0);
   const volumeUsd = trades.reduce((sum, trade) => sum + Number(trade.usdAmount || 0), 0);
@@ -4746,7 +4809,7 @@ function bindEvents() {
   });
 
   $$(".swap-tabs button").forEach((button) => {
-    button.addEventListener("click", () => setSwapSide(button.dataset.swapSide));
+    button.addEventListener("click", () => setSwapSide(button.dataset.swapSide, { announceExternal: true }));
   });
   $$("[data-trade-view]").forEach((button) => {
     button.addEventListener("click", () => setTradeView(button.dataset.tradeView));
@@ -4785,7 +4848,7 @@ function bindEvents() {
   });
   $$(".quick-amounts button").forEach((button) => {
     button.addEventListener("click", () => {
-      setSwapSide("buy");
+      setSwapSide("buy", { announceExternal: true });
       state.buyInputMode = "bnb";
       $("#swapAmount").value = button.dataset.amount;
       estimateSwapReceive();
@@ -4794,7 +4857,7 @@ function bindEvents() {
   $$("#sellPercentages button").forEach((button) => {
     button.addEventListener("click", async () => {
       if (state.swapSide !== "sell") {
-        setSwapSide("sell");
+        setSwapSide("sell", { announceExternal: true });
       }
       await refreshSelectedTokenBalance();
       const percent = Number(button.dataset.sellPercent || 0);
@@ -4808,7 +4871,7 @@ function bindEvents() {
     });
   });
   $("#swapReverse").addEventListener("click", () => {
-    setSwapSide(state.swapSide === "buy" ? "sell" : "buy");
+    setSwapSide(state.swapSide === "buy" ? "sell" : "buy", { announceExternal: true });
   });
   $("#swapSubmit").addEventListener("click", handleSwapSubmit);
 
