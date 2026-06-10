@@ -2852,6 +2852,7 @@ async function estimateSwapReceive() {
           if (!parsedTokenInput) {
             return;
           }
+          const requestedTokenAmount = parsedTokenInput.wei;
           let tokenAmount = parsedTokenInput.wei;
           if (tokenAmount > maxTokenAmount) {
             tokenAmount = maxTokenAmount;
@@ -2860,7 +2861,9 @@ async function estimateSwapReceive() {
           if (!isLatestSwapEstimate(requestId, snapshot)) {
             return;
           }
-          $("#buyTokenAmount").value = Number(ethers.formatEther(tokenAmount)).toFixed(6);
+          if (tokenAmount !== requestedTokenAmount) {
+            $("#buyTokenAmount").value = Number(ethers.formatEther(tokenAmount)).toFixed(6);
+          }
           $("#swapAmount").value = Number(ethers.formatEther(cost)).toFixed(6);
           $("#swapReceive").textContent = `预计支付: ${Number(ethers.formatEther(cost)).toFixed(6)} BNB`;
           return;
