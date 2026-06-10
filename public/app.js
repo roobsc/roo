@@ -1155,7 +1155,7 @@ function getProjectStage(launched, progress) {
   if (launched) {
     return "launched";
   }
-  if (progress >= 80) {
+  if (Number(progress || 0) > 70 && Number(progress || 0) < 100) {
     return "launching";
   }
   return "new";
@@ -1783,6 +1783,10 @@ function getVisibleProjects() {
       }
       if (state.marketFilter === "launched") {
         return project.listed;
+      }
+      if (state.marketFilter === "launching") {
+        const progress = Number(project.progress || 0);
+        return !project.listed && progress > 70 && progress < 100;
       }
       return project.stage === state.marketFilter;
     })
