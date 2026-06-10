@@ -3871,7 +3871,7 @@ async function handleSwapSubmit() {
   }
 }
 
-handleSwapSubmit = async function handleSwapSubmitOptimized() {
+async function handleSwapSubmitOptimized() {
   const project = state.selectedProject;
   const button = $("#swapSubmit");
   if (isExternalTradeOnlyProject(project)) {
