@@ -531,6 +531,14 @@ let tradeChartResizeObserver = null;
 let swapEstimateTimer = null;
 let swapEstimateRequestId = 0;
 const projectLaunchpadCache = new Map();
+const projectBasicsCache = new Map();
+const quoteBuyCache = new Map();
+const PROJECT_BASICS_CACHE_TTL_MS = 1200;
+const QUOTE_BUY_CACHE_TTL_MS = 800;
+let browserProviderInstance = null;
+let rpcProviderInstance = null;
+let signerInstance = null;
+let signerAddressCache = "";
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -565,6 +573,74 @@ function compactLink(url) {
   } catch {
     return value;
   }
+}
+
+function getProjectBasicsCacheKey(launchpadAddress, projectId) {
+  return `${normalizeAddress(launchpadAddress)}:${String(projectId)}`;
+}
+
+function getQuoteBuyCacheKey(launchpadAddress, projectId, tokenAmount) {
+  return `${normalizeAddress(launchpadAddress)}:${String(projectId)}:${String(tokenAmount)}`;
+}
+
+function getReadProvider() {
+  if (window.ethereum) {
+    if (!browserProviderInstance) {
+      browserProviderInstance = new ethers.BrowserProvider(window.ethereum);
+    }
+    return browserProviderInstance;
+  }
+  if (!rpcProviderInstance) {
+    rpcProviderInstance = new ethers.JsonRpcProvider(config.rpcUrl || "https://bsc-dataseed.binance.org");
+  }
+  return rpcProviderInstance;
+}
+
+function clearProjectRuntimeCaches(project = null) {
+  if (!project || project.projectId === undefined || project.projectId === null || !project.launchpadAddress) {
+    projectBasicsCache.clear();
+    quoteBuyCache.clear();
+    return;
+  }
+  const basicsPrefix = `${normalizeAddress(project.launchpadAddress)}:${String(project.projectId)}`;
+  for (const key of projectBasicsCache.keys()) {
+    if (key === basicsPrefix) {
+      projectBasicsCache.delete(key);
+    }
+  }
+  for (const key of quoteBuyCache.keys()) {
+    if (key.startsWith(`${basicsPrefix}:`)) {
+      quoteBuyCache.delete(key);
+    }
+  }
+}
+
+async function getProjectBasicsCached(launchpad, projectId, launchpadAddress, options = {}) {
+  const ttlMs = Number(options.ttlMs || PROJECT_BASICS_CACHE_TTL_MS);
+  const force = Boolean(options.force);
+  const cacheKey = getProjectBasicsCacheKey(launchpadAddress, projectId);
+  const now = Date.now();
+  const cached = projectBasicsCache.get(cacheKey);
+  if (!force && cached && now - cached.at <= ttlMs) {
+    return cached.value;
+  }
+  const value = await launchpad.getProjectBasics(BigInt(projectId));
+  projectBasicsCache.set(cacheKey, { value, at: now });
+  return value;
+}
+
+async function quoteBuyCached(launchpad, projectId, tokenAmount, launchpadAddress, options = {}) {
+  const ttlMs = Number(options.ttlMs || QUOTE_BUY_CACHE_TTL_MS);
+  const force = Boolean(options.force);
+  const cacheKey = getQuoteBuyCacheKey(launchpadAddress, projectId, tokenAmount);
+  const now = Date.now();
+  const cached = quoteBuyCache.get(cacheKey);
+  if (!force && cached && now - cached.at <= ttlMs) {
+    return cached.value;
+  }
+  const value = await launchpad.quoteBuy(projectId, tokenAmount);
+  quoteBuyCache.set(cacheKey, { value, at: now });
+  return value;
 }
 
 function escapeAttr(value) {
@@ -1019,7 +1095,7 @@ async function ensureProjectLaunchpad(project, signerOrProvider) {
   if (hasConfiguredAddress(launchpadAddress)) {
     try {
       const launchpad = getLaunchpadContract(signerOrProvider, launchpadAddress);
-      const basics = await launchpad.getProjectBasics(BigInt(project.projectId));
+      const basics = await getProjectBasicsCached(launchpad, project.projectId, launchpadAddress);
       if (normalizeAddress(basics.token) === normalizeAddress(project.contract)) {
         project.launchpadAddress = launchpadAddress;
         return project;
@@ -2847,11 +2923,10 @@ async function estimateSwapReceive() {
       if (!window.ethers || (!swapAmountText && !buyTokenAmountText) || !isLatestSwapEstimate(requestId, snapshot)) {
         return;
       }
-      const provider = window.ethereum
-        ? new ethers.BrowserProvider(window.ethereum)
-        : new ethers.JsonRpcProvider(config.rpcUrl || "https://bsc-dataseed.binance.org");
+      const provider = getReadProvider();
       const tradeProject = await ensureProjectLaunchpad(project, provider);
-      const launchpad = getLaunchpadContract(provider, getProjectLaunchpadAddress(tradeProject));
+      const tradeLaunchpadAddress = getProjectLaunchpadAddress(tradeProject);
+      const launchpad = getLaunchpadContract(provider, tradeLaunchpadAddress);
       if (!isLatestSwapEstimate(requestId, snapshot)) {
         return;
       }
@@ -2876,7 +2951,12 @@ async function estimateSwapReceive() {
           if (tokenAmount > maxTokenAmount) {
             tokenAmount = maxTokenAmount;
           }
-          const cost = await launchpad.quoteBuy(BigInt(tradeProject.projectId), tokenAmount);
+          const cost = await quoteBuyCached(
+            launchpad,
+            BigInt(tradeProject.projectId),
+            tokenAmount,
+            tradeLaunchpadAddress
+          );
           if (!isLatestSwapEstimate(requestId, snapshot)) {
             return;
           }
@@ -2895,7 +2975,8 @@ async function estimateSwapReceive() {
           launchpad,
           BigInt(tradeProject.projectId),
           parsedBnbInput.wei,
-          maxTokenAmount
+          maxTokenAmount,
+          tradeLaunchpadAddress
         );
         if (!isLatestSwapEstimate(requestId, snapshot)) {
           return;
@@ -2949,12 +3030,16 @@ async function updateBuyCapQuote(project = state.selectedProject) {
     ) {
       throw new Error("not tradable");
     }
-    const provider = window.ethereum
-      ? new ethers.BrowserProvider(window.ethereum)
-      : new ethers.JsonRpcProvider(config.rpcUrl || "https://bsc-dataseed.binance.org");
+    const provider = getReadProvider();
     const tradeProject = await ensureProjectLaunchpad(project, provider);
-    const launchpad = getLaunchpadContract(provider, getProjectLaunchpadAddress(tradeProject));
-    const cost = await launchpad.quoteBuy(BigInt(tradeProject.projectId), ethers.parseEther(String(remainingWalletCap)));
+    const tradeLaunchpadAddress = getProjectLaunchpadAddress(tradeProject);
+    const launchpad = getLaunchpadContract(provider, tradeLaunchpadAddress);
+    const cost = await quoteBuyCached(
+      launchpad,
+      BigInt(tradeProject.projectId),
+      ethers.parseEther(String(remainingWalletCap)),
+      tradeLaunchpadAddress
+    );
     const formattedCost = Number(ethers.formatEther(cost)).toFixed(6);
     element.textContent = t("walletCapQuote")
       .replace("{amount}", capText)
@@ -3022,7 +3107,7 @@ async function refreshSelectedTokenBalance() {
     return;
   }
   try {
-    const provider = new ethers.BrowserProvider(window.ethereum);
+    const provider = getReadProvider();
     const token = new ethers.Contract(project.contract, ERC20_ABI, provider);
     const balance = await token.balanceOf(state.wallet);
     state.selectedTokenBalanceWei = balance;
@@ -3127,6 +3212,7 @@ function setOwnerPanelStatus(message, tone = "") {
 
 function setOwnerPanelButtonsEnabled(enabled) {
   [
+    "#ownerRetryLaunch",
     "#ownerPauseExternalLp",
     "#ownerResumeExternalLp",
     "#ownerProcessExternalLp",
@@ -3402,8 +3488,14 @@ async function getTradeSigner() {
     throw new Error("请先在 config.js 填写已部署的 launchpadAddress。");
   }
   await connectWallet();
-  const provider = new ethers.BrowserProvider(window.ethereum);
+  const provider = getReadProvider();
+  const normalizedWallet = normalizeAddress(state.wallet || "");
+  if (signerInstance && signerAddressCache && signerAddressCache === normalizedWallet) {
+    return { provider, signer: signerInstance };
+  }
   const signer = await provider.getSigner();
+  signerInstance = signer;
+  signerAddressCache = normalizeAddress(await signer.getAddress());
   return { provider, signer };
 }
 
@@ -3424,22 +3516,22 @@ function isLaunchReadyProject(project) {
   return Number(project.progress || 0) >= 100 || remaining <= 0.000001;
 }
 
-async function estimateTokenAmountForBnb(launchpad, projectId, maxBnbAmount, maxTokenAmount = ethers.parseEther(String(INTERNAL_SALE_SUPPLY))) {
+async function estimateTokenAmountForBnb(launchpad, projectId, maxBnbAmount, maxTokenAmount = ethers.parseEther(String(INTERNAL_SALE_SUPPLY)), launchpadAddress = config.launchpadAddress) {
   if (maxBnbAmount <= 0n) {
     return 0n;
   }
   if (maxTokenAmount <= 0n) {
     return 0n;
   }
-  const maxCost = await launchpad.quoteBuy(projectId, maxTokenAmount);
+  const maxCost = await quoteBuyCached(launchpad, projectId, maxTokenAmount, launchpadAddress);
   if (maxCost <= maxBnbAmount) {
     return maxTokenAmount;
   }
   let low = 0n;
   let high = maxTokenAmount;
-  for (let i = 0; i < 80 && low < high; i += 1) {
+  for (let i = 0; i < 28 && low < high; i += 1) {
     const mid = (low + high + 1n) / 2n;
-    const cost = await launchpad.quoteBuy(projectId, mid);
+    const cost = await quoteBuyCached(launchpad, projectId, mid, launchpadAddress);
     if (cost <= maxBnbAmount) {
       low = mid;
     } else {
@@ -3456,7 +3548,7 @@ async function readInternalSaleRemaining(project, signerOrProvider) {
   }
   try {
     const launchpad = getLaunchpadContract(signerOrProvider, launchpadAddress);
-    const basics = await launchpad.getProjectBasics(BigInt(project.projectId));
+    const basics = await getProjectBasicsCached(launchpad, project.projectId, launchpadAddress);
     const internalSaleSupply = ethers.parseEther(String(INTERNAL_SALE_SUPPLY));
     const tokensSold = BigInt(basics.tokensSold || 0n);
     return tokensSold >= internalSaleSupply ? 0n : internalSaleSupply - tokensSold;
@@ -3475,13 +3567,13 @@ async function findExecutableBuyQuote(
   launchpad,
   projectId,
   desiredTokenAmount,
-  { slippageBps = 0n, maxValue = null } = {}
+  { slippageBps = 0n, maxValue = null, launchpadAddress = config.launchpadAddress } = {}
 ) {
   const quote = async (amount) => {
     if (amount <= 0n) {
       return null;
     }
-    const cost = await launchpad.quoteBuy(projectId, amount);
+    const cost = await quoteBuyCached(launchpad, projectId, amount, launchpadAddress);
     const value = maxValue !== null ? maxValue : cost + ((cost * slippageBps) / 10000n);
     if (value < cost) {
       return null;
@@ -3552,7 +3644,13 @@ async function handleSwapSubmit() {
         tokenAmount = parsedAmount.wei;
       } else {
         const bnbAmount = parsedAmount.wei;
-        tokenAmount = await estimateTokenAmountForBnb(launchpad, buyProjectId, bnbAmount, maxTokenAmount);
+        tokenAmount = await estimateTokenAmountForBnb(
+          launchpad,
+          buyProjectId,
+          bnbAmount,
+          maxTokenAmount,
+          tradeLaunchpadAddress
+        );
         if (tokenAmount <= 0n && maxTokenAmount > 0n) {
           tokenAmount = maxTokenAmount;
         }
@@ -3572,8 +3670,8 @@ async function handleSwapSubmit() {
         buyProjectId,
         tokenAmount,
         state.buyInputMode === "bnb"
-          ? { maxValue: bnbInputAmount }
-          : { slippageBps }
+          ? { maxValue: bnbInputAmount, launchpadAddress: tradeLaunchpadAddress }
+          : { slippageBps, launchpadAddress: tradeLaunchpadAddress }
       );
       if (!executable || executable.tokenAmount <= 0n) {
         throw new Error("这个项目内盘已卖完，不能继续买入。");
@@ -3602,6 +3700,7 @@ async function handleSwapSubmit() {
       const tx = await launchpad.buy(buyProjectId, tokenAmount, buyOverrides);
       $("#swapReceive").textContent = `购买交易已提交：${tx.hash}`;
       await tx.wait();
+      clearProjectRuntimeCaches(tradeProject);
       await saveBackendTrade(tradeProject, {
         side: "buy",
         txHash: tx.hash,
@@ -3631,6 +3730,7 @@ async function handleSwapSubmit() {
     const tx = await launchpad.sell(BigInt(tradeProject.projectId), tokenAmount);
     $("#swapReceive").textContent = `卖出交易已提交：${tx.hash}`;
     await tx.wait();
+    clearProjectRuntimeCaches(tradeProject);
     await saveBackendTrade(tradeProject, {
       side: "sell",
       txHash: tx.hash,
@@ -3895,9 +3995,7 @@ async function refreshOpenTradeProjectFromChain(project) {
     return;
   }
   try {
-    const provider = window.ethereum
-      ? new ethers.BrowserProvider(window.ethereum)
-      : new ethers.JsonRpcProvider(config.rpcUrl || "https://bsc-dataseed.binance.org");
+    const provider = getReadProvider();
     const freshProject = await refreshProjectFromChain(project, provider);
     if (
       !freshProject
@@ -4598,6 +4696,11 @@ function bindEvents() {
     fillOwnerPanelTokenFromSelectedProject();
     setOwnerPanelStatus("已填入当前选中的代币地址。", "success");
   });
+  $("#ownerRetryLaunch").addEventListener("click", async (event) => {
+    await runOwnerPanelAction(event.currentTarget, async (launchpad) => launchpad.launchToPancakeByToken(
+      getOwnerPanelTokenAddress()
+    ));
+  });
   $("#ownerPauseExternalLp").addEventListener("click", async (event) => {
     await runOwnerPanelAction(event.currentTarget, async (launchpad) => launchpad.setProjectExternalLpProcessingByToken(
       getOwnerPanelTokenAddress(),
@@ -5005,6 +5108,9 @@ function boot() {
   if (window.ethereum && typeof window.ethereum.on === "function") {
     window.ethereum.on("accountsChanged", async (accounts) => {
       state.wallet = accounts && accounts[0] ? accounts[0] : "";
+      signerInstance = null;
+      signerAddressCache = "";
+      clearProjectRuntimeCaches();
       if (state.wallet) {
         $("#connectButton").textContent = shortAddress(state.wallet);
         $("#profileConnectButton").textContent = shortAddress(state.wallet);
@@ -5015,6 +5121,7 @@ function boot() {
       await refreshProfile().catch(() => {});
     });
     window.ethereum.on("chainChanged", async () => {
+      clearProjectRuntimeCaches();
       await refreshOwnerPanel().catch(() => {});
       if (state.selectedProject) {
         await refreshTradeDividendInfo(state.selectedProject).catch(() => {});
