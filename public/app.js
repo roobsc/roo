@@ -3113,7 +3113,7 @@ function decodeOwnerPanelError(error) {
       return "当前没有可补救的 LP / BNB 缓存。";
     }
     if (code === 23) {
-      return "当前项目还没发射，这个按钮只适用于外盘 LP 处理。内盘补救请使用“清扫待处理税缓存”。";
+      return "当前项目还没发射。暂停 LP 处理、恢复 LP 处理、手动处理 LP 这 3 个按钮只适用于外盘；清扫待处理税缓存、重置当前分红并转出支持内盘补救。";
     }
     if (code === 24) {
       return "接收地址无效。";
