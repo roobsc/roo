@@ -1643,11 +1643,122 @@ function buildFastLocalBuyExecution(project, parsedAmount, slippageBps = 0n) {
   };
 }
 
+async function resolveFastBuyExecution(tradeProject, launchpad, parsedAmount, slippageBps, launchpadAddress) {
+  const remainingWalletCap = getRemainingWalletCap(tradeProject);
+  if (isWalletCapEnabled(tradeProject) && remainingWalletCap <= 0) {
+    throw new Error(t("walletCapReached"));
+  }
+
+  const capMaxTokenAmount = ethers.parseEther(String(isWalletCapEnabled(tradeProject) ? remainingWalletCap : INTERNAL_SALE_SUPPLY));
+  const maxTokenAmount = await getBuySearchUpperBound(tradeProject, launchpad.runner, capMaxTokenAmount);
+  const buyProjectId = BigInt(tradeProject.projectId);
+
+  if (maxTokenAmount <= 0n) {
+    return null;
+  }
+
+  if (state.buyInputMode === "token") {
+    let tokenAmount = parsedAmount.wei;
+    if (tokenAmount > maxTokenAmount) {
+      tokenAmount = maxTokenAmount;
+    }
+    if (tokenAmount <= 0n) {
+      return null;
+    }
+    const cost = await quoteBuyCached(launchpad, buyProjectId, tokenAmount, launchpadAddress);
+    return {
+      executable: {
+        tokenAmount,
+        cost,
+        value: cost + ((cost * slippageBps) / 10000n)
+      },
+      maxTokenAmount
+    };
+  }
+
+  const budget = parsedAmount.wei;
+  if (budget <= 0n) {
+    return null;
+  }
+
+  const localExecution = buildFastLocalBuyExecution(tradeProject, parsedAmount, slippageBps);
+  let low = 0n;
+  let high = maxTokenAmount;
+  let bestAmount = 0n;
+
+  if (localExecution && localExecution.tokenAmount > 0n) {
+    const guessedAmount = localExecution.tokenAmount > maxTokenAmount ? maxTokenAmount : localExecution.tokenAmount;
+    const guessedCost = await quoteBuyCached(launchpad, buyProjectId, guessedAmount, launchpadAddress);
+    if (guessedCost <= budget) {
+      bestAmount = guessedAmount;
+      low = guessedAmount;
+    } else if (guessedAmount > 0n) {
+      high = guessedAmount - 1n;
+    }
+  }
+
+  while (low < high) {
+    const mid = (low + high + 1n) / 2n;
+    const cost = await quoteBuyCached(launchpad, buyProjectId, mid, launchpadAddress);
+    if (cost <= budget) {
+      bestAmount = mid;
+      low = mid;
+    } else {
+      high = mid - 1n;
+    }
+  }
+
+  if (bestAmount <= 0n) {
+    return null;
+  }
+
+  const cost = await quoteBuyCached(launchpad, buyProjectId, bestAmount, launchpadAddress);
+  return {
+    executable: {
+      tokenAmount: bestAmount,
+      cost,
+      value: cost
+    },
+    maxTokenAmount
+  };
+}
+
 function isUserRejectedError(error) {
   const nestedCode = error && error.info && error.info.error ? error.info.error.code : undefined;
   const code = Number(error && (error.code ?? nestedCode));
   const message = String(error && (error.shortMessage || error.reason || error.message) || "").toLowerCase();
   return code === 4001 || code === -32000 || message.includes("user rejected") || message.includes("user denied");
+}
+
+async function submitRawLaunchpadTransaction({ signer, launchpadAddress, method, args = [], value = 0n, gasLimit = 0n }) {
+  if (!window.ethereum || typeof window.ethereum.request !== "function") {
+    throw new Error("wallet request unsupported");
+  }
+  const from = await signer.getAddress();
+  const iface = new ethers.Interface(LAUNCHPAD_ABI);
+  const txRequest = {
+    from,
+    to: launchpadAddress,
+    data: iface.encodeFunctionData(method, args)
+  };
+  if (value > 0n) {
+    txRequest.value = ethers.toBeHex(value);
+  }
+  if (gasLimit > 0n) {
+    txRequest.gas = ethers.toBeHex(gasLimit);
+  }
+  const hash = await window.ethereum.request({
+    method: "eth_sendTransaction",
+    params: [txRequest]
+  });
+  if (!hash) {
+    throw new Error("wallet did not return tx hash");
+  }
+  const provider = signer.provider || getReadProvider();
+  return {
+    hash,
+    wait: async () => provider.waitForTransaction(hash)
+  };
 }
 
 async function resolveBuyExecutionSlow(tradeProject, launchpad, parsedAmount, slippageBps, launchpadAddress) {
@@ -3906,38 +4017,27 @@ async function handleSwapSubmitOptimized() {
     const launchpad = getLaunchpadContract(signer, tradeLaunchpadAddress);
 
     if (state.swapSide === "buy") {
-      const remainingWalletCap = getRemainingWalletCap(tradeProject);
-      if (isWalletCapEnabled(tradeProject) && remainingWalletCap <= 0) {
-        throw new Error(t("walletCapReached"));
-      }
-
       const buyProjectId = BigInt(tradeProject.projectId);
       const slippageBps = BigInt(Math.round(Number(state.slippagePercent || 0) * 100));
-      let executable = null;
-      let maxTokenAmount = 0n;
-      let tokenAmount = 0n;
-
-      const fastLocalExecution = buildFastLocalBuyExecution(tradeProject, parsedAmount, slippageBps);
-      if (fastLocalExecution) {
-        executable = {
-          tokenAmount: fastLocalExecution.tokenAmount,
-          cost: fastLocalExecution.cost,
-          value: fastLocalExecution.value
-        };
-        maxTokenAmount = fastLocalExecution.maxTokenAmount;
-        tokenAmount = fastLocalExecution.tokenAmount;
-      } else {
-        const slowResolved = await resolveBuyExecutionSlow(
+      let resolved = await resolveFastBuyExecution(
+        tradeProject,
+        launchpad,
+        parsedAmount,
+        slippageBps,
+        tradeLaunchpadAddress
+      );
+      if (!resolved || !resolved.executable) {
+        resolved = await resolveBuyExecutionSlow(
           tradeProject,
           launchpad,
           parsedAmount,
           slippageBps,
           tradeLaunchpadAddress
         );
-        executable = slowResolved && slowResolved.executable ? slowResolved.executable : null;
-        maxTokenAmount = slowResolved && slowResolved.maxTokenAmount ? slowResolved.maxTokenAmount : 0n;
-        tokenAmount = executable && executable.tokenAmount ? executable.tokenAmount : 0n;
       }
+      let executable = resolved && resolved.executable ? resolved.executable : null;
+      let maxTokenAmount = resolved && resolved.maxTokenAmount ? resolved.maxTokenAmount : 0n;
+      let tokenAmount = executable && executable.tokenAmount ? executable.tokenAmount : 0n;
 
       if (!executable || tokenAmount <= 0n) {
         throw new Error("这个项目内盘已卖完，不能继续买入。");
@@ -3962,8 +4062,18 @@ async function handleSwapSubmitOptimized() {
       }
 
       let tx;
+      const rawGasLimit = maxTokenAmount > 0n && executable.tokenAmount >= maxTokenAmount
+        ? BigInt(config.finalBuyGasLimit || 6_500_000)
+        : BigInt(config.internalBuyGasLimit || 1_500_000);
       try {
-        tx = await launchpad.buy(buyProjectId, tokenAmount, buildBuyOverrides(executable, maxTokenAmount));
+        tx = await submitRawLaunchpadTransaction({
+          signer,
+          launchpadAddress: tradeLaunchpadAddress,
+          method: "buy",
+          args: [buyProjectId, tokenAmount],
+          value: state.buyInputMode === "bnb" ? executable.cost : executable.value,
+          gasLimit: rawGasLimit
+        });
       } catch (fastError) {
         if (isUserRejectedError(fastError)) {
           throw fastError;
