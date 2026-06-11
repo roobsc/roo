@@ -3304,6 +3304,8 @@ function setOwnerPanelStatus(message, tone = "") {
 
 function setOwnerPanelButtonsEnabled(enabled) {
   [
+    "#ownerSetLpDead",
+    "#ownerSetLpPlatform",
     "#ownerRetryLaunch",
     "#ownerPauseExternalLp",
     "#ownerResumeExternalLp",
@@ -3469,6 +3471,7 @@ async function refreshOwnerPanel() {
     return;
   }
 
+  const configuredOwner = hasConfiguredAddress(config.ownerAddress) ? config.ownerAddress : "";
   const launchpadInput = $("#ownerLaunchpadAddress");
   const ownerInput = $("#ownerWalletAddress");
   const lpReceiverInput = $("#ownerLaunchLpReceiver");
@@ -3484,39 +3487,73 @@ async function refreshOwnerPanel() {
   }
 
   if (!hasConfiguredAddress(config.launchpadAddress)) {
-    state.launchpadOwner = "";
-    state.isLaunchpadOwner = false;
-    panel.hidden = true;
+    state.launchpadOwner = configuredOwner || "";
+    state.isLaunchpadOwner = !!normalizeAddress(state.wallet)
+      && !!normalizeAddress(configuredOwner)
+      && normalizeAddress(configuredOwner) === normalizeAddress(state.wallet);
+    panel.hidden = !state.isLaunchpadOwner;
     if (ownerInput) {
-      ownerInput.value = "";
+      ownerInput.value = configuredOwner || "";
     }
-    setOwnerPanelButtonsEnabled(false);
-    setOwnerPanelStatus("仅合约 owner 可执行这些管理操作。");
+    setOwnerPanelButtonsEnabled(state.isLaunchpadOwner);
+    if (state.isLaunchpadOwner) {
+      fillOwnerPanelTokenFromSelectedProject();
+      setOwnerPanelStatus("Owner fallback active.", "success");
+    } else {
+      setOwnerPanelStatus("仅合约 owner 可执行这些管理操作。");
+    }
     return;
   }
 
   if (!window.ethers || !window.ethereum) {
-    state.launchpadOwner = "";
-    state.isLaunchpadOwner = false;
-    panel.hidden = true;
+    state.launchpadOwner = configuredOwner || "";
+    state.isLaunchpadOwner = !!normalizeAddress(state.wallet)
+      && !!normalizeAddress(configuredOwner)
+      && normalizeAddress(configuredOwner) === normalizeAddress(state.wallet);
+    panel.hidden = !state.isLaunchpadOwner;
     if (ownerInput) {
-      ownerInput.value = "";
+      ownerInput.value = configuredOwner || "";
     }
-    setOwnerPanelButtonsEnabled(false);
-    setOwnerPanelStatus("仅合约 owner 可执行这些管理操作。");
+    setOwnerPanelButtonsEnabled(state.isLaunchpadOwner);
+    if (state.isLaunchpadOwner) {
+      fillOwnerPanelTokenFromSelectedProject();
+      setOwnerPanelStatus("Owner fallback active.", "success");
+    } else {
+      setOwnerPanelStatus("仅合约 owner 可执行这些管理操作。");
+    }
     return;
   }
 
   try {
-    const provider = new ethers.BrowserProvider(window.ethereum);
-    const launchpad = getLaunchpadContract(provider);
-    const owner = await launchpad.owner();
-    const lpReceiver = await launchpad.launchLpReceiver();
-    state.launchpadOwner = owner || "";
-    state.isLaunchpadOwner = !!normalizeAddress(state.wallet) && normalizeAddress(owner) === normalizeAddress(state.wallet);
+    let owner = "";
+    let lpReceiver = "";
+
+    try {
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const launchpad = getLaunchpadContract(provider);
+      [owner, lpReceiver] = await Promise.all([
+        launchpad.owner(),
+        launchpad.launchLpReceiver()
+      ]);
+    } catch {
+      if (config.rpcUrl) {
+        const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+        const launchpad = getLaunchpadContract(provider);
+        [owner, lpReceiver] = await Promise.all([
+          launchpad.owner(),
+          launchpad.launchLpReceiver()
+        ]);
+      }
+    }
+
+    const effectiveOwner = owner || configuredOwner;
+    state.launchpadOwner = effectiveOwner || "";
+    state.isLaunchpadOwner = !!normalizeAddress(state.wallet)
+      && !!normalizeAddress(effectiveOwner)
+      && normalizeAddress(effectiveOwner) === normalizeAddress(state.wallet);
     panel.hidden = !state.isLaunchpadOwner;
     if (ownerInput) {
-      ownerInput.value = owner || "";
+      ownerInput.value = effectiveOwner || "";
     }
     if (lpReceiverInput) {
       lpReceiverInput.value = lpReceiver || "";
@@ -3524,19 +3561,26 @@ async function refreshOwnerPanel() {
     setOwnerPanelButtonsEnabled(state.isLaunchpadOwner);
     if (state.isLaunchpadOwner) {
       fillOwnerPanelTokenFromSelectedProject();
-      setOwnerPanelStatus("当前钱包就是合约 owner，可以操作 LP 处理和分红救援。", "success");
+      setOwnerPanelStatus(owner ? "当前钱包就是合约 owner，可以操作 LP 处理和分红救援。" : "Owner fallback active.", "success");
     } else {
       setOwnerPanelStatus("仅合约 owner 可执行这些管理操作。");
     }
   } catch (error) {
-    state.launchpadOwner = "";
-    state.isLaunchpadOwner = false;
-    panel.hidden = true;
+    state.launchpadOwner = configuredOwner || "";
+    state.isLaunchpadOwner = !!normalizeAddress(state.wallet)
+      && !!normalizeAddress(configuredOwner)
+      && normalizeAddress(configuredOwner) === normalizeAddress(state.wallet);
+    panel.hidden = !state.isLaunchpadOwner;
     if (ownerInput) {
-      ownerInput.value = "";
+      ownerInput.value = configuredOwner || "";
     }
-    setOwnerPanelButtonsEnabled(false);
-    setOwnerPanelStatus("仅合约 owner 可执行这些管理操作。");
+    setOwnerPanelButtonsEnabled(state.isLaunchpadOwner);
+    if (state.isLaunchpadOwner) {
+      fillOwnerPanelTokenFromSelectedProject();
+      setOwnerPanelStatus("Owner fallback active.", "success");
+    } else {
+      setOwnerPanelStatus("仅合约 owner 可执行这些管理操作。");
+    }
   }
 }
 
@@ -4809,6 +4853,12 @@ function bindEvents() {
   });
   $("#ownerSetLpDead").addEventListener("click", async (event) => {
     await runOwnerPanelAction(event.currentTarget, async (launchpad) => launchpad.setLaunchLpReceiver(DEAD_ADDRESS));
+  });
+  $("#ownerSetLpPlatform").addEventListener("click", async (event) => {
+    await runOwnerPanelAction(
+      event.currentTarget,
+      async (launchpad) => launchpad.setLaunchLpReceiver(config.platformFeeWallet)
+    );
   });
   $("#ownerRetryLaunch").addEventListener("click", async (event) => {
     await runOwnerPanelAction(event.currentTarget, async (launchpad) => launchpad.launchToPancakeByToken(
