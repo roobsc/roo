@@ -11,5 +11,6 @@ window.LAUNCHPAD_CONFIG = {
   bnbSymbol: "BNB",
   defaultLaunchThresholdBnb: 3,
   defaultBuyCapTokens: 25,
-  platformTaxBps: 100
+  platformTaxBps: 100,
+  vanitySaltMaxAttempts: 600000
 };

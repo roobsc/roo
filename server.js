@@ -905,6 +905,23 @@ async function findVanitySaltParallel(args) {
   });
 }
 
+async function findVanitySaltResilient(args) {
+  const initialAttempts = Math.min(Number(args.maxAttempts || 240000), 1_000_000);
+  try {
+    return await findVanitySaltParallel({ ...args, maxAttempts: initialAttempts });
+  } catch (error) {
+    const message = error && error.message ? error.message : String(error);
+    if (!message.includes("No vanity salt found")) {
+      throw error;
+    }
+    const boostedAttempts = Math.min(Math.max(initialAttempts * 2, 600000), 1_000_000);
+    if (boostedAttempts === initialAttempts) {
+      throw error;
+    }
+    return findVanitySaltParallel({ ...args, maxAttempts: boostedAttempts });
+  }
+}
+
 async function submitTokenVerification(args) {
   if (!bscscanApiKey) {
     return {
@@ -1178,7 +1195,7 @@ async function handleApi(req, res, url) {
   if (req.method === "POST" && url.pathname === "/api/vanity-salt") {
     const payload = await readJsonBody(req);
     const startedAt = Date.now();
-    const result = await findVanitySaltParallel({
+    const result = await findVanitySaltResilient({
       launchpadAddress: payload.launchpadAddress,
       creator: payload.creator,
       tokenName: payload.tokenName,
