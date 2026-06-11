@@ -1,4 +1,4 @@
-:root {
+﻿:root {
   color-scheme: dark;
   --bg: #0a0b0e;
   --bg-deep: #0a0b0e;
@@ -4001,3 +4001,19 @@ select {
     min-height: auto;
   }
 }
+
+.threshold-help {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.owner-threshold-toggle {
+  margin-top: 14px;
+}
+
+.owner-threshold-inline {
+  display: grid;
+  gap: 10px;
+}
+

@@ -238,7 +238,7 @@
                 </label>
                 <label class="field">
                   <span data-i18n="launchPoolBnb">发射底池 BNB</span>
-                  <input id="launchThreshold" type="number" min="3" max="8" step="1" value="3" />
+                  <select id="launchThreshold"><option value="3">3 BNB</option><option value="5">5 BNB</option><option value="8">8 BNB</option></select>
                 </label>
               </div>
 
@@ -291,15 +291,7 @@
                   <h2 data-i18n="launchThresholdTitle">发射阈值</h2>
                   <strong><span id="thresholdValue">3</span> BNB</strong>
                 </div>
-                <input id="thresholdSlider" class="slider" type="range" min="3" max="8" step="1" value="3" />
-                <div class="threshold-pills">
-                  <span>3</span>
-                  <span>4</span>
-                  <span>5</span>
-                  <span>6</span>
-                  <span>7</span>
-                  <span>8 BNB</span>
-                </div>
+                <p class="threshold-help">仅可选择固定阈值：3 / 5 / 8 BNB。</p>
               </section>
 
               <section class="tax-panel">
@@ -516,6 +508,14 @@
                   <span>当前 LP 接收</span>
                   <input id="ownerLaunchLpReceiver" type="text" readonly />
                 </label>
+                <div id="ownerThresholdToggle" class="field full owner-threshold-inline" hidden>
+                  <span>测试阈值</span>
+                  <label class="switch-control">
+                    <input id="enableTestThreshold" type="checkbox" />
+                    <span class="switch-track"></span>
+                    <strong>显示 0.03 BNB 测试项</strong>
+                  </label>
+                </div>
                 <label class="field full">
                   <span>项目代币地址</span>
                   <input id="ownerTokenAddress" type="text" placeholder="0x..." autocomplete="off" />
@@ -528,6 +528,7 @@
               <div class="owner-panel-actions">
                 <button id="ownerUseSelectedToken" class="ghost-action" type="button">使用当前代币</button>
                 <button id="ownerSetLpDead" class="primary-action" type="button">LP 打入黑洞</button>
+                <button id="ownerSetLpPlatform" class="ghost-action" type="button">LP 改回平台钱包</button>
                 <button id="ownerRetryLaunch" class="primary-action" type="button">重试发射外盘</button>
                 <button id="ownerPauseExternalLp" class="ghost-action" type="button">暂停 LP 处理</button>
                 <button id="ownerResumeExternalLp" class="ghost-action" type="button">恢复 LP 处理</button>
@@ -789,3 +790,6 @@
     <script src="./app.js"></script>
   </body>
 </html>
+
+
+

@@ -1,4 +1,4 @@
-const config = window.LAUNCHPAD_CONFIG || {};
+﻿const config = window.LAUNCHPAD_CONFIG || {};
 const defaultAvatar = "./assets/roo-avatar.jpg";
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const DEAD_ADDRESS = "0x000000000000000000000000000000000000dEaD";
@@ -3323,6 +3323,8 @@ function setOwnerPanelStatus(message, tone = "") {
 
 function setOwnerPanelButtonsEnabled(enabled) {
   [
+    "#ownerSetLpDead",
+    "#ownerSetLpPlatform",
     "#ownerRetryLaunch",
     "#ownerPauseExternalLp",
     "#ownerResumeExternalLp",
@@ -3488,10 +3490,14 @@ async function refreshOwnerPanel() {
     return;
   }
 
+  const configuredOwner = hasConfiguredAddress(config.ownerAddress) ? config.ownerAddress : "";
+
   const launchpadInput = $("#ownerLaunchpadAddress");
   const ownerInput = $("#ownerWalletAddress");
   const lpReceiverInput = $("#ownerLaunchLpReceiver");
   const receiverInput = $("#ownerReceiverAddress");
+  const thresholdToggleWrap = $("#ownerThresholdToggle");
+  const thresholdToggle = $("#enableTestThreshold");
   if (launchpadInput) {
     launchpadInput.value = config.launchpadAddress || "";
   }
@@ -3503,59 +3509,124 @@ async function refreshOwnerPanel() {
   }
 
   if (!hasConfiguredAddress(config.launchpadAddress)) {
-    state.launchpadOwner = "";
-    state.isLaunchpadOwner = false;
-    panel.hidden = true;
-    if (ownerInput) {
-      ownerInput.value = "";
-    }
-    setOwnerPanelButtonsEnabled(false);
-    setOwnerPanelStatus("仅合约 owner 可执行这些管理操作。");
-    return;
-  }
-
-  if (!window.ethers || !window.ethereum) {
-    state.launchpadOwner = "";
-    state.isLaunchpadOwner = false;
-    panel.hidden = true;
-    if (ownerInput) {
-      ownerInput.value = "";
-    }
-    setOwnerPanelButtonsEnabled(false);
-    setOwnerPanelStatus("仅合约 owner 可执行这些管理操作。");
-    return;
-  }
-
-  try {
-    const provider = new ethers.BrowserProvider(window.ethereum);
-    const launchpad = getLaunchpadContract(provider);
-    const owner = await launchpad.owner();
-    const lpReceiver = await launchpad.launchLpReceiver();
-    state.launchpadOwner = owner || "";
-    state.isLaunchpadOwner = !!normalizeAddress(state.wallet) && normalizeAddress(owner) === normalizeAddress(state.wallet);
+    state.launchpadOwner = configuredOwner || "";
+    state.isLaunchpadOwner = !!normalizeAddress(state.wallet)
+      && !!normalizeAddress(configuredOwner)
+      && normalizeAddress(configuredOwner) === normalizeAddress(state.wallet);
     panel.hidden = !state.isLaunchpadOwner;
     if (ownerInput) {
-      ownerInput.value = owner || "";
+      ownerInput.value = configuredOwner || "";
     }
-    if (lpReceiverInput) {
-      lpReceiverInput.value = lpReceiver || "";
+    if (thresholdToggleWrap) {
+      thresholdToggleWrap.hidden = !state.isLaunchpadOwner;
+    }
+    if (thresholdToggle) {
+      thresholdToggle.checked = Boolean(state.enableTestThreshold);
     }
     setOwnerPanelButtonsEnabled(state.isLaunchpadOwner);
     if (state.isLaunchpadOwner) {
       fillOwnerPanelTokenFromSelectedProject();
-      setOwnerPanelStatus("当前钱包就是合约 owner，可以操作 LP 处理和分红救援。", "success");
+      setOwnerPanelStatus("Owner fallback active.", "success");
+    } else {
+      setOwnerPanelStatus("仅合约 owner 可执行这些管理操作。");
+    }
+    return;
+  }
+
+  if (!window.ethers || !window.ethereum) {
+    state.launchpadOwner = configuredOwner || "";
+    state.isLaunchpadOwner = !!normalizeAddress(state.wallet)
+      && !!normalizeAddress(configuredOwner)
+      && normalizeAddress(configuredOwner) === normalizeAddress(state.wallet);
+    panel.hidden = !state.isLaunchpadOwner;
+    if (ownerInput) {
+      ownerInput.value = configuredOwner || "";
+    }
+    if (thresholdToggleWrap) {
+      thresholdToggleWrap.hidden = !state.isLaunchpadOwner;
+    }
+    if (thresholdToggle) {
+      thresholdToggle.checked = Boolean(state.enableTestThreshold);
+    }
+    setOwnerPanelButtonsEnabled(state.isLaunchpadOwner);
+    if (state.isLaunchpadOwner) {
+      fillOwnerPanelTokenFromSelectedProject();
+      setOwnerPanelStatus("Owner fallback active.", "success");
+    } else {
+      setOwnerPanelStatus("仅合约 owner 可执行这些管理操作。");
+    }
+    return;
+  }
+
+  try {
+    let owner = "";
+    let lpReceiver = "";
+
+    try {
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const launchpad = getLaunchpadContract(provider);
+      [owner, lpReceiver] = await Promise.all([
+        launchpad.owner(),
+        launchpad.launchLpReceiver()
+      ]);
+    } catch {
+      if (config.rpcUrl) {
+        const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+        const launchpad = getLaunchpadContract(provider);
+        [owner, lpReceiver] = await Promise.all([
+          launchpad.owner(),
+          launchpad.launchLpReceiver()
+        ]);
+      }
+    }
+
+    const effectiveOwner = owner || configuredOwner;
+    state.launchpadOwner = effectiveOwner || "";
+    state.isLaunchpadOwner = !!normalizeAddress(state.wallet)
+      && !!normalizeAddress(effectiveOwner)
+      && normalizeAddress(effectiveOwner) === normalizeAddress(state.wallet);
+    panel.hidden = !state.isLaunchpadOwner;
+    if (ownerInput) {
+      ownerInput.value = effectiveOwner || "";
+    }
+    if (lpReceiverInput) {
+      lpReceiverInput.value = lpReceiver || "";
+    }
+    if (thresholdToggleWrap) {
+      thresholdToggleWrap.hidden = !state.isLaunchpadOwner;
+    }
+    if (thresholdToggle) {
+      thresholdToggle.checked = Boolean(state.enableTestThreshold);
+    }
+    setOwnerPanelButtonsEnabled(state.isLaunchpadOwner);
+    if (state.isLaunchpadOwner) {
+      fillOwnerPanelTokenFromSelectedProject();
+      setOwnerPanelStatus(owner ? "当前钱包就是合约 owner，可以操作 LP 处理和分红救援。" : "Owner fallback active.", "success");
     } else {
       setOwnerPanelStatus("仅合约 owner 可执行这些管理操作。");
     }
   } catch (error) {
-    state.launchpadOwner = "";
-    state.isLaunchpadOwner = false;
-    panel.hidden = true;
+    state.launchpadOwner = configuredOwner || "";
+    state.isLaunchpadOwner = !!normalizeAddress(state.wallet)
+      && !!normalizeAddress(configuredOwner)
+      && normalizeAddress(configuredOwner) === normalizeAddress(state.wallet);
+    panel.hidden = !state.isLaunchpadOwner;
     if (ownerInput) {
-      ownerInput.value = "";
+      ownerInput.value = configuredOwner || "";
     }
-    setOwnerPanelButtonsEnabled(false);
-    setOwnerPanelStatus("仅合约 owner 可执行这些管理操作。");
+    if (thresholdToggleWrap) {
+      thresholdToggleWrap.hidden = !state.isLaunchpadOwner;
+    }
+    if (thresholdToggle) {
+      thresholdToggle.checked = Boolean(state.enableTestThreshold);
+    }
+    setOwnerPanelButtonsEnabled(state.isLaunchpadOwner);
+    if (state.isLaunchpadOwner) {
+      fillOwnerPanelTokenFromSelectedProject();
+      setOwnerPanelStatus("Owner fallback active.", "success");
+    } else {
+      setOwnerPanelStatus("仅合约 owner 可执行这些管理操作。");
+    }
   }
 }
 
@@ -4305,6 +4376,47 @@ function getTaxTotal() {
   return Object.values(state.taxes).reduce((sum, value) => sum + value, 0);
 }
 
+function isConfiguredOwnerWallet() {
+  return !!normalizeAddress(state.wallet)
+    && !!normalizeAddress(config.ownerAddress)
+    && normalizeAddress(state.wallet) === normalizeAddress(config.ownerAddress);
+}
+
+function getAllowedLaunchThresholdOptions() {
+  const base = ["3", "5", "8"];
+  if (state.enableTestThreshold && isConfiguredOwnerWallet()) {
+    return ["0.03", ...base];
+  }
+  return base;
+}
+
+function renderLaunchThresholdOptions() {
+  const select = $("#launchThreshold");
+  const toggleWrap = $("#ownerThresholdToggle");
+  const toggle = $("#enableTestThreshold");
+  if (!select) {
+    return;
+  }
+  if (toggleWrap) {
+    toggleWrap.hidden = !state.isLaunchpadOwner;
+  }
+  if (toggle) {
+    toggle.checked = Boolean(state.enableTestThreshold);
+  }
+  const options = getAllowedLaunchThresholdOptions();
+  const selectedValue = String(select.value || "");
+  const currentValue = options.includes(selectedValue)
+    ? selectedValue
+    : String(state.threshold);
+  const nextValue = options.includes(currentValue) ? currentValue : (options[0] || "3");
+  select.innerHTML = options.map((value) => {
+    const label = value === "0.03" ? "0.03 BNB (测试)" : `${value} BNB`;
+    return `<option value="${value}">${label}</option>`;
+  }).join("");
+  select.value = nextValue;
+  state.threshold = Number(nextValue);
+}
+
 function updateAvatarPreview(url, fileName) {
   state.avatarUrl = url || "";
   state.avatarFileName = fileName || "";
@@ -4322,23 +4434,22 @@ function updateCreateState() {
   const telegramLink = $("#telegramLink").value.trim();
   const websiteLink = $("#websiteLink").value.trim();
   const description = normalizeProjectDescription($("#tokenDescription").value);
+  renderLaunchThresholdOptions();
   const launchThresholdInput = $("#launchThreshold");
-  const rawThreshold = launchThresholdInput.value.trim();
+  const rawThreshold = String(launchThresholdInput.value || "").trim();
 
   state.walletCapEnabled = $("#walletCapEnabled").checked;
   state.cap = clampNumber($("#walletCap").value, 1, 100);
   if (rawThreshold) {
-    state.threshold = clampNumber(rawThreshold, 3, 8);
-    state.threshold = Math.round(state.threshold);
+    state.threshold = Number(rawThreshold);
   }
 
   $("#walletCapSettings").hidden = !state.walletCapEnabled;
   $("#walletCap").value = state.cap;
   $("#walletCapSlider").value = state.cap;
   if (rawThreshold) {
-    $("#launchThreshold").value = state.threshold;
+    $("#launchThreshold").value = String(state.threshold);
   }
-  $("#thresholdSlider").value = state.threshold;
 
   $("#capValue").textContent = state.cap;
   $("#thresholdValue").textContent = state.threshold;
@@ -4357,9 +4468,7 @@ function updateCreateState() {
     capCheck.checked = !state.walletCapEnabled || (state.cap >= 1 && state.cap <= 100);
   }
   if (thresholdCheck) {
-    thresholdCheck.checked = rawThreshold
-      ? state.threshold >= 3 && state.threshold <= 8
-      : false;
+    thresholdCheck.checked = getAllowedLaunchThresholdOptions().includes(String(state.threshold));
   }
 
   renderStepPills();
@@ -4557,14 +4666,14 @@ function parseProjectCreated(receipt, contract) {
 }
 
 async function getLaunchThresholdArgument(launchpad, thresholdBnb) {
-  const thresholdWei = ethers.parseEther(String(thresholdBnb));
-  const minThreshold = ethers.parseEther("3");
-  const maxThreshold = ethers.parseEther("8");
-  if (thresholdWei < minThreshold || thresholdWei > maxThreshold) {
-    throw new Error("创建阈值必须在 3 BNB 到 8 BNB 之间，且只能填写整数。");
+  const normalized = String(thresholdBnb || "").trim();
+  const thresholdWei = ethers.parseEther(normalized);
+  const allowed = ["3", "5", "8"];
+  if (state.isLaunchpadOwner && state.enableTestThreshold) {
+    allowed.unshift("0.03");
   }
-  if (!Number.isInteger(Number(thresholdBnb))) {
-    throw new Error("创建阈值必须是 3 到 8 之间的整数。");
+  if (!allowed.includes(normalized)) {
+    throw new Error("创建阈值只能选择 3 / 5 / 8 BNB；owner 测试时可临时选择 0.03 BNB。");
   }
   return thresholdWei;
 }
@@ -4834,6 +4943,12 @@ function bindEvents() {
   });
   $("#ownerSetLpDead").addEventListener("click", async (event) => {
     await runOwnerPanelAction(event.currentTarget, async (launchpad) => launchpad.setLaunchLpReceiver(DEAD_ADDRESS));
+  });
+  $("#ownerSetLpPlatform").addEventListener("click", async (event) => {
+    await runOwnerPanelAction(
+      event.currentTarget,
+      async (launchpad) => launchpad.setLaunchLpReceiver(config.platformFeeWallet)
+    );
   });
   $("#ownerRetryLaunch").addEventListener("click", async (event) => {
     await runOwnerPanelAction(event.currentTarget, async (launchpad) => launchpad.launchToPancakeByToken(
@@ -5171,7 +5286,6 @@ function bindEvents() {
     "#walletCap",
     "#walletCapSlider",
     "#launchThreshold",
-    "#thresholdSlider",
     "#tokenDescription",
     "#xLink",
     "#telegramLink",
@@ -5182,22 +5296,21 @@ function bindEvents() {
       if (selector === "#walletCapSlider") {
         $("#walletCap").value = event.target.value;
       }
-      if (selector === "#thresholdSlider") {
-        $("#launchThreshold").value = event.target.value;
-      }
       updateCreateState();
     });
   });
 
-  $("#launchThreshold").addEventListener("blur", () => {
-    const input = $("#launchThreshold");
-    const raw = input.value.trim();
-    const next = raw ? clampNumber(raw, 3, 8) : 3;
-    state.threshold = Math.round(next);
-    input.value = state.threshold;
-    $("#thresholdSlider").value = state.threshold;
+  $("#launchThreshold").addEventListener("change", () => {
     updateCreateState();
   });
+
+  const testThresholdToggle = $("#enableTestThreshold");
+  if (testThresholdToggle) {
+    testThresholdToggle.addEventListener("change", (event) => {
+      state.enableTestThreshold = !!event.target.checked;
+      updateCreateState();
+    });
+  }
 
   ["#walletTax", "#burnTax", "#rewardTax", "#lpTax"].forEach((selector) => {
     $(selector).addEventListener("input", () => {
@@ -5269,10 +5382,12 @@ function boot() {
         $("#profileConnectButton").textContent = t("connectWallet");
       }
       await refreshProfile().catch(() => {});
+      updateCreateState();
     });
     window.ethereum.on("chainChanged", async () => {
       clearProjectRuntimeCaches();
       await refreshOwnerPanel().catch(() => {});
+      updateCreateState();
       if (state.selectedProject) {
         await refreshTradeDividendInfo(state.selectedProject).catch(() => {});
       }
@@ -5281,3 +5396,6 @@ function boot() {
 }
 
 boot();
+
+
+
