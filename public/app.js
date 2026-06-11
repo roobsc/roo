@@ -950,9 +950,9 @@ async function loadBackendProjects() {
     state.marketLoading = true;
     renderProjects();
     const query = new URLSearchParams();
-    if (hasConfiguredAddress(config.launchpadAddress)) {
-      query.set("launchpadAddress", config.launchpadAddress);
-    }
+    getKnownLaunchpadAddresses().forEach((address) => {
+      query.append("launchpadAddress", address);
+    });
     const data = await apiGet(`/api/projects${query.toString() ? `?${query.toString()}` : ""}`);
     mergeProjects(data.projects || []);
     renderTradeTicker();

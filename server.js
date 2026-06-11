@@ -280,15 +280,18 @@ async function getVerificationTasksDue(limit = 10) {
 }
 
 async function getProjectsStore(launchpadAddress = "") {
-  const normalizedLaunchpad = normalizeToken(launchpadAddress);
+  const launchpadAddresses = Array.isArray(launchpadAddress) ? launchpadAddress : [launchpadAddress];
+  const normalizedLaunchpads = launchpadAddresses
+    .map((address) => normalizeToken(address))
+    .filter(Boolean);
   if (!sql) {
     const db = readDb();
     return db.projects
       .filter((project) => {
-        if (!normalizedLaunchpad) {
+        if (!normalizedLaunchpads.length) {
           return true;
         }
-        return normalizeToken(project.launchpadAddress) === normalizedLaunchpad;
+        return normalizedLaunchpads.includes(normalizeToken(project.launchpadAddress));
       })
       .slice()
       .sort((a, b) => Number(b.marketCap || 0) - Number(a.marketCap || 0));
@@ -302,10 +305,10 @@ async function getProjectsStore(launchpadAddress = "") {
   return rows
     .map((row) => row.data)
     .filter((project) => {
-      if (!normalizedLaunchpad) {
+      if (!normalizedLaunchpads.length) {
         return true;
       }
-      return normalizeToken(project.launchpadAddress) === normalizedLaunchpad;
+      return normalizedLaunchpads.includes(normalizeToken(project.launchpadAddress));
     });
 }
 
@@ -1101,7 +1104,7 @@ function kickVerificationMaintenance() {
 
 async function handleApi(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/projects") {
-    const launchpadAddress = url.searchParams.get("launchpadAddress") || "";
+    const launchpadAddress = url.searchParams.getAll("launchpadAddress");
     const projects = await getProjectsStore(launchpadAddress);
     return sendJson(res, 200, { projects });
   }
