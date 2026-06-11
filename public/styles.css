@@ -3787,6 +3787,11 @@ select {
     width: auto;
   }
 
+  .top-social-link,
+  .top-language {
+    display: none !important;
+  }
+
   .top-actions button,
   .tab {
     min-width: 0;
