@@ -4773,14 +4773,8 @@ async function submitCreateTokenWithDevBuy() {
     const launchpad = new ethers.Contract(config.launchpadAddress, LAUNCHPAD_ABI, signer);
     const launchThresholdArgument = await getLaunchThresholdArgument(launchpad, params.launchThresholdBnb);
     setCreateStatus(t("createReadVanityStatus"), "");
-    let initCodeHash = "";
-    try {
-      initCodeHash = await launchpad.launchpadTokenInitCodeHash(params.name, params.symbol);
-    } catch {
-      throw new Error(t("launchpadOutdatedError"));
-    }
     setCreateStatus(t("createGenerateAddressStatus"), "");
-    const vanity = await findVanitySalt(params, wallet, initCodeHash);
+    const vanity = await findVanitySalt(params, wallet);
     setCreateStatus(t("createVerifyAddressStatus").replace("{address}", vanity.predicted), "");
     const chainPredicted = await verifyVanityWithLaunchpad(launchpad, params, vanity, wallet);
     setCreateStatus(t("createConfirmTxStatus").replace("{address}", chainPredicted), "");
