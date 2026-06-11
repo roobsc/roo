@@ -56,6 +56,11 @@ const postgresUrl = process.env.POSTGRES_URL || process.env.DATABASE_URL || "";
 const blobToken = process.env.BLOB_READ_WRITE_TOKEN || "";
 const maxAvatarBytes = 2 * 1024 * 1024;
 const dexscreenerApiBase = process.env.DEXSCREENER_API_URL || "https://api.dexscreener.com/latest/dex/tokens";
+const verificationSweepIntervalMs = Math.max(15_000, Number(process.env.VERIFICATION_SWEEP_INTERVAL_MS || 60_000));
+const verificationStatusRetryMs = Math.max(15_000, Number(process.env.VERIFICATION_STATUS_RETRY_MS || 45_000));
+const verificationFailureRetryMs = Math.max(60_000, Number(process.env.VERIFICATION_FAILURE_RETRY_MS || 180_000));
+const verificationPostSubmitDelayMs = Math.max(10_000, Number(process.env.VERIFICATION_POST_SUBMIT_DELAY_MS || 20_000));
+const verificationRetryLimit = Math.max(1, Number(process.env.VERIFICATION_RETRY_LIMIT || 6));
 const sql = postgresUrl
   ? postgres(postgresUrl, {
       ssl: postgresUrl.includes("sslmode=disable") ? false : "require",
@@ -64,6 +69,9 @@ const sql = postgresUrl
     })
   : null;
 let schemaReady = false;
+let verificationSweepTimer = null;
+let verificationSweepRunning = false;
+let lastVerificationSweepAt = 0;
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -83,16 +91,21 @@ function ensureDb() {
     fs.mkdirSync(dataDir, { recursive: true });
   }
   if (!fs.existsSync(dbPath)) {
-    fs.writeFileSync(dbPath, JSON.stringify({ projects: [], trades: [] }, null, 2));
+    fs.writeFileSync(dbPath, JSON.stringify({ projects: [], trades: [], verificationTasks: [] }, null, 2));
   }
 }
 
 function readDb() {
   ensureDb();
   try {
-    return JSON.parse(fs.readFileSync(dbPath, "utf8"));
+    const parsed = JSON.parse(fs.readFileSync(dbPath, "utf8"));
+    return {
+      projects: Array.isArray(parsed.projects) ? parsed.projects : [],
+      trades: Array.isArray(parsed.trades) ? parsed.trades : [],
+      verificationTasks: Array.isArray(parsed.verificationTasks) ? parsed.verificationTasks : []
+    };
   } catch {
-    return { projects: [], trades: [] };
+    return { projects: [], trades: [], verificationTasks: [] };
   }
 }
 
@@ -138,6 +151,19 @@ async function ensureSchema() {
   `;
   await sql`create index if not exists trades_project_time_idx on trades (project_id, timestamp_ms)`;
   await sql`create index if not exists trades_token_time_idx on trades (lower(token), timestamp_ms)`;
+  await sql`
+    create table if not exists verification_tasks (
+      task_key text primary key,
+      contract text not null,
+      status text not null,
+      guid text,
+      next_retry_at timestamptz,
+      updated_at timestamptz not null default now(),
+      data jsonb not null
+    )
+  `;
+  await sql`create index if not exists verification_tasks_status_retry_idx on verification_tasks (status, next_retry_at asc)`;
+  await sql`create index if not exists verification_tasks_contract_idx on verification_tasks (lower(contract))`;
   schemaReady = true;
 }
 
@@ -147,6 +173,110 @@ function normalizeProject(project) {
     updatedAt: new Date().toISOString(),
     createdAt: project.createdAt || new Date().toISOString()
   };
+}
+
+function normalizeVerificationTask(task) {
+  const nowIso = new Date().toISOString();
+  return {
+    chainId: Number(task.chainId || 56),
+    contractAddress: task.contractAddress,
+    tokenName: task.tokenName || "",
+    tokenSymbol: task.tokenSymbol || "",
+    supply: task.supply || "10000000000000000000000",
+    launchpadAddress: task.launchpadAddress || "",
+    status: task.status || "queued",
+    guid: task.guid || "",
+    sourceKey: task.sourceKey || "",
+    contractName: task.contractName || "",
+    submitAttempts: Number(task.submitAttempts || 0),
+    statusChecks: Number(task.statusChecks || 0),
+    lastMessage: task.lastMessage || "",
+    nextRetryAt: task.nextRetryAt || nowIso,
+    verifiedAt: task.verifiedAt || "",
+    createdAt: task.createdAt || nowIso,
+    updatedAt: nowIso
+  };
+}
+
+function getVerificationTaskKey(contractAddress) {
+  return `verify:${normalizeToken(contractAddress)}`;
+}
+
+async function getVerificationTaskStore(contractAddress) {
+  const normalizedContract = normalizeToken(contractAddress);
+  if (!normalizedContract) {
+    return null;
+  }
+  if (!sql) {
+    const db = readDb();
+    return db.verificationTasks.find((task) => normalizeToken(task.contractAddress) === normalizedContract) || null;
+  }
+  await ensureSchema();
+  const rows = await sql`
+    select data
+    from verification_tasks
+    where lower(contract) = ${normalizedContract}
+    limit 1
+  `;
+  return rows.length ? rows[0].data : null;
+}
+
+async function upsertVerificationTaskStore(task) {
+  const saved = normalizeVerificationTask(task);
+  const key = getVerificationTaskKey(saved.contractAddress);
+  if (!sql) {
+    const db = readDb();
+    const index = db.verificationTasks.findIndex((item) => getVerificationTaskKey(item.contractAddress) === key);
+    if (index >= 0) {
+      db.verificationTasks[index] = { ...db.verificationTasks[index], ...saved };
+    } else {
+      db.verificationTasks.unshift(saved);
+    }
+    writeDb(db);
+    return saved;
+  }
+  await ensureSchema();
+  await sql`
+    insert into verification_tasks (task_key, contract, status, guid, next_retry_at, updated_at, data)
+    values (
+      ${key},
+      ${saved.contractAddress},
+      ${saved.status},
+      ${saved.guid || null},
+      ${saved.nextRetryAt || null},
+      now(),
+      ${sql.json(saved)}
+    )
+    on conflict (task_key) do update set
+      contract = excluded.contract,
+      status = excluded.status,
+      guid = excluded.guid,
+      next_retry_at = excluded.next_retry_at,
+      updated_at = now(),
+      data = verification_tasks.data || excluded.data
+  `;
+  return saved;
+}
+
+async function getVerificationTasksDue(limit = 10) {
+  if (!sql) {
+    const db = readDb();
+    const now = Date.now();
+    return db.verificationTasks
+      .filter((task) => ["queued", "submitted"].includes(String(task.status || "")))
+      .filter((task) => !task.nextRetryAt || Date.parse(task.nextRetryAt) <= now)
+      .slice(0, limit);
+  }
+  await ensureSchema();
+  const rows = await sql`
+    select data
+    from verification_tasks
+    where status in ('queued', 'submitted')
+      and (next_retry_at is null or next_retry_at <= now())
+    order by next_retry_at asc nulls first, updated_at asc
+    limit ${limit}
+  `;
+  return rows.map((row) => row.data);
 }
 
 async function getProjectsStore(launchpadAddress = "") {
@@ -618,6 +748,25 @@ function isAcceptedVerificationResponse(result) {
     || message.includes("pass - verified");
 }
 
+function isVerifiedVerificationStatus(result) {
+  const data = result && result.data ? result.data : {};
+  const message = String(data.result || data.message || "").toLowerCase();
+  return String(data.status || "") === "1"
+    || message.includes("pass - verified")
+    || message.includes("already verified")
+    || message.includes("source code already verified");
+}
+
+function isPendingVerificationStatus(result) {
+  const data = result && result.data ? result.data : {};
+  const message = String(data.result || data.message || "").toLowerCase();
+  return message.includes("pending")
+    || message.includes("queue")
+    || message.includes("in progress")
+    || message.includes("already pending")
+    || message.includes("please try again");
+}
+
 function readLaunchpadTokenBytecode() {
   if (!fs.existsSync(launchpadTokenBinPath)) {
     throw new Error("Missing build-vanity LaunchpadToken bytecode. Run solc build first.");
@@ -844,6 +993,112 @@ async function checkVerificationStatus(args) {
   return parseVerificationApiResponse(response, text);
 }
 
+async function submitVerificationTask(task) {
+  const current = normalizeVerificationTask(task);
+  const result = await submitTokenVerification(current);
+  const now = new Date();
+  const nextTask = {
+    ...current,
+    submitAttempts: Number(current.submitAttempts || 0) + 1,
+    lastMessage: String(result && result.data && (result.data.result || result.data.message) || result.message || ""),
+    sourceKey: result.sourceKey || current.sourceKey || "",
+    contractName: result.contractName || current.contractName || ""
+  };
+  if (result.skipped) {
+    nextTask.status = "skipped";
+    nextTask.nextRetryAt = new Date(now.getTime() + verificationFailureRetryMs).toISOString();
+    return upsertVerificationTaskStore(nextTask);
+  }
+  if (isAcceptedVerificationResponse(result)) {
+    nextTask.status = isVerifiedVerificationStatus(result) ? "verified" : "submitted";
+    nextTask.guid = String(result && result.data && result.data.result || nextTask.guid || "");
+    nextTask.verifiedAt = nextTask.status === "verified" ? now.toISOString() : current.verifiedAt || "";
+    nextTask.nextRetryAt = nextTask.status === "verified"
+      ? now.toISOString()
+      : new Date(now.getTime() + verificationPostSubmitDelayMs).toISOString();
+    return upsertVerificationTaskStore(nextTask);
+  }
+  nextTask.status = nextTask.submitAttempts >= verificationRetryLimit ? "failed" : "queued";
+  nextTask.nextRetryAt = new Date(now.getTime() + verificationFailureRetryMs).toISOString();
+  return upsertVerificationTaskStore(nextTask);
+}
+
+async function refreshVerificationTaskStatus(task) {
+  const current = normalizeVerificationTask(task);
+  if (!current.guid) {
+    return submitVerificationTask(current);
+  }
+  const result = await checkVerificationStatus({
+    chainId: current.chainId,
+    guid: current.guid
+  });
+  const now = new Date();
+  const nextTask = {
+    ...current,
+    statusChecks: Number(current.statusChecks || 0) + 1,
+    lastMessage: String(result && result.data && (result.data.result || result.data.message) || result.message || "")
+  };
+  if (result.skipped) {
+    nextTask.status = "skipped";
+    nextTask.nextRetryAt = new Date(now.getTime() + verificationFailureRetryMs).toISOString();
+    return upsertVerificationTaskStore(nextTask);
+  }
+  if (isVerifiedVerificationStatus(result)) {
+    nextTask.status = "verified";
+    nextTask.verifiedAt = now.toISOString();
+    nextTask.nextRetryAt = now.toISOString();
+    return upsertVerificationTaskStore(nextTask);
+  }
+  if (isPendingVerificationStatus(result)) {
+    nextTask.status = "submitted";
+    nextTask.nextRetryAt = new Date(now.getTime() + verificationStatusRetryMs).toISOString();
+    return upsertVerificationTaskStore(nextTask);
+  }
+  nextTask.status = Number(current.submitAttempts || 0) >= verificationRetryLimit ? "failed" : "queued";
+  nextTask.guid = "";
+  nextTask.nextRetryAt = new Date(now.getTime() + verificationFailureRetryMs).toISOString();
+  return upsertVerificationTaskStore(nextTask);
+}
+
+async function processVerificationQueue(limit = 6) {
+  if (verificationSweepRunning) {
+    return;
+  }
+  verificationSweepRunning = true;
+  lastVerificationSweepAt = Date.now();
+  try {
+    const tasks = await getVerificationTasksDue(limit);
+    for (const task of tasks) {
+      try {
+        if (task.guid) {
+          await refreshVerificationTaskStatus(task);
+        } else {
+          await submitVerificationTask(task);
+        }
+      } catch (error) {
+        await upsertVerificationTaskStore({
+          ...task,
+          status: Number(task.submitAttempts || 0) >= verificationRetryLimit ? "failed" : "queued",
+          lastMessage: error.message || "Verification queue processing failed",
+          nextRetryAt: new Date(Date.now() + verificationFailureRetryMs).toISOString()
+        });
+      }
+    }
+  } finally {
+    verificationSweepRunning = false;
+  }
+}
+
+function kickVerificationMaintenance() {
+  if (verificationSweepRunning) {
+    return;
+  }
+  if (Date.now() - lastVerificationSweepAt < verificationSweepIntervalMs / 2) {
+    return;
+  }
+  processVerificationQueue().catch(() => {});
+}
+
 async function handleApi(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/projects") {
     const launchpadAddress = url.searchParams.get("launchpadAddress") || "";
@@ -893,14 +1148,30 @@ async function handleApi(req, res, url) {
 
   if (req.method === "POST" && url.pathname === "/api/verify-token") {
     const payload = await readJsonBody(req);
-    const result = await submitTokenVerification({
+    const verificationArgs = {
       chainId: payload.chainId || 56,
       contractAddress: payload.contractAddress,
       tokenName: payload.tokenName,
       tokenSymbol: payload.tokenSymbol,
       supply: payload.supply || "10000000000000000000000",
       launchpadAddress: payload.launchpadAddress
+    };
+    const result = await submitTokenVerification(verificationArgs);
+    await upsertVerificationTaskStore({
+      ...verificationArgs,
+      status: result.skipped ? "skipped" : (isAcceptedVerificationResponse(result) ? (isVerifiedVerificationStatus(result) ? "verified" : "submitted") : "queued"),
+      guid: isAcceptedVerificationResponse(result) ? String(result && result.data && result.data.result || "") : "",
+      sourceKey: result.sourceKey || "",
+      contractName: result.contractName || "",
+      submitAttempts: 1,
+      statusChecks: 0,
+      lastMessage: String(result && result.data && (result.data.result || result.data.message) || result.message || ""),
+      verifiedAt: isVerifiedVerificationStatus(result) ? new Date().toISOString() : "",
+      nextRetryAt: isVerifiedVerificationStatus(result)
+        ? new Date().toISOString()
+        : new Date(Date.now() + (isAcceptedVerificationResponse(result) ? verificationPostSubmitDelayMs : verificationFailureRetryMs)).toISOString()
     });
+    kickVerificationMaintenance();
     return sendJson(res, 200, result);
   }
 
@@ -934,6 +1205,21 @@ async function handleApi(req, res, url) {
       chainId: payload.chainId || 56,
       guid: payload.guid
     });
+    if (payload.contractAddress) {
+      const existing = await getVerificationTaskStore(payload.contractAddress);
+      if (existing) {
+        await upsertVerificationTaskStore({
+          ...existing,
+          status: isVerifiedVerificationStatus(result) ? "verified" : (isPendingVerificationStatus(result) ? "submitted" : existing.status || "queued"),
+          lastMessage: String(result && result.data && (result.data.result || result.data.message) || result.message || ""),
+          statusChecks: Number(existing.statusChecks || 0) + 1,
+          verifiedAt: isVerifiedVerificationStatus(result) ? new Date().toISOString() : existing.verifiedAt || "",
+          nextRetryAt: isVerifiedVerificationStatus(result)
+            ? new Date().toISOString()
+            : new Date(Date.now() + verificationStatusRetryMs).toISOString()
+        });
+      }
+    }
     return sendJson(res, 200, result);
   }
 
@@ -977,6 +1263,7 @@ function serveStatic(req, res, url) {
 async function requestHandler(req, res) {
   const url = new URL(req.url || "/", `http://${req.headers.host || "127.0.0.1"}`);
   try {
+    kickVerificationMaintenance();
     if (req.method === "OPTIONS") {
       send(res, 204, "");
       return;
@@ -992,6 +1279,9 @@ async function requestHandler(req, res) {
 }
 
 if (require.main === module) {
+  verificationSweepTimer = setInterval(() => {
+    processVerificationQueue().catch(() => {});
+  }, verificationSweepIntervalMs);
   const server = http.createServer(requestHandler);
   server.listen(port, "127.0.0.1", () => {
     console.log(`roo launchpad running at http://127.0.0.1:${port}`);

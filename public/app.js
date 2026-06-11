@@ -3253,7 +3253,7 @@ async function autoVerifyCreatedToken(params, created) {
       ? String(result.data.result || result.data.message)
       : "已提交开源验证。";
     if (String(result.data && result.data.status || "") === "1" && result.data && result.data.result) {
-      const verifyStatus = await pollVerificationStatus(config.chainId || 56, result.data.result);
+      const verifyStatus = await pollVerificationStatus(config.chainId || 56, result.data.result, created.token);
       return `自动开源完成：${verifyStatus}`;
     }
     return `已提交自动开源：${initialMessage}`;
@@ -3262,12 +3262,12 @@ async function autoVerifyCreatedToken(params, created) {
   }
 }
 
-async function pollVerificationStatus(chainId, guid) {
+async function pollVerificationStatus(chainId, guid, contractAddress = "") {
   const maxChecks = Number(config.verifyStatusMaxChecks || 18);
   const delayMs = Number(config.verifyStatusDelayMs || 5000);
   for (let attempt = 0; attempt < maxChecks; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, delayMs));
-    const result = await apiPost("/api/verify-status", { chainId, guid });
+    const result = await apiPost("/api/verify-status", { chainId, guid, contractAddress });
     const status = String(result && result.data && result.data.status || "");
     const message = String(result && result.data && (result.data.result || result.data.message) || "");
     const normalized = message.toLowerCase();
