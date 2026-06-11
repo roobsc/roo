@@ -921,20 +921,7 @@ async function findVanitySaltParallel(args) {
 }
 
 async function findVanitySaltResilient(args) {
-  const initialAttempts = Math.min(Number(args.maxAttempts || 240000), 1_000_000);
-  try {
-    return await findVanitySaltParallel({ ...args, maxAttempts: initialAttempts });
-  } catch (error) {
-    const message = error && error.message ? error.message : String(error);
-    if (!message.includes("No vanity salt found")) {
-      throw error;
-    }
-    const boostedAttempts = Math.min(Math.max(initialAttempts * 2, 600000), 1_000_000);
-    if (boostedAttempts === initialAttempts) {
-      throw error;
-    }
-    return findVanitySaltParallel({ ...args, maxAttempts: boostedAttempts });
-  }
+  return findVanitySaltOnChain(args);
 }
 
 async function findVanitySaltOnChain(args) {
@@ -1244,16 +1231,7 @@ async function handleApi(req, res, url) {
       suffix: payload.suffix || "0000",
       maxAttempts: payload.maxAttempts || 240000
     };
-    let result;
-    try {
-      result = await findVanitySaltResilient(requestArgs);
-    } catch (error) {
-      const message = error && error.message ? error.message : String(error);
-      if (!message.includes("No vanity salt found")) {
-        throw error;
-      }
-      result = await findVanitySaltOnChain(requestArgs);
-    }
+    const result = await findVanitySaltResilient(requestArgs);
     result.elapsedMs = Date.now() - startedAt;
     console.log("vanity-salt", JSON.stringify({
       suffix: result.suffix,
