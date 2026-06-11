@@ -149,10 +149,17 @@ function normalizeProject(project) {
   };
 }
 
-async function getProjectsStore() {
+async function getProjectsStore(launchpadAddress = "") {
+  const normalizedLaunchpad = normalizeToken(launchpadAddress);
   if (!sql) {
     const db = readDb();
     return db.projects
+      .filter((project) => {
+        if (!normalizedLaunchpad) {
+          return true;
+        }
+        return normalizeToken(project.launchpadAddress) === normalizedLaunchpad;
+      })
       .slice()
       .sort((a, b) => Number(b.marketCap || 0) - Number(a.marketCap || 0));
   }
@@ -162,7 +169,14 @@ async function getProjectsStore() {
     from projects
     order by market_cap desc nulls last, updated_at desc
   `;
-  return rows.map((row) => row.data);
+  return rows
+    .map((row) => row.data)
+    .filter((project) => {
+      if (!normalizedLaunchpad) {
+        return true;
+      }
+      return normalizeToken(project.launchpadAddress) === normalizedLaunchpad;
+    });
 }
 
 async function upsertProjectStore(project) {
@@ -832,7 +846,8 @@ async function checkVerificationStatus(args) {
 
 async function handleApi(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/projects") {
-    const projects = await getProjectsStore();
+    const launchpadAddress = url.searchParams.get("launchpadAddress") || "";
+    const projects = await getProjectsStore(launchpadAddress);
     return sendJson(res, 200, { projects });
   }
 

@@ -958,7 +958,11 @@ async function loadBackendProjects() {
   try {
     state.marketLoading = true;
     renderProjects();
-    const data = await apiGet("/api/projects");
+    const query = new URLSearchParams();
+    if (hasConfiguredAddress(config.launchpadAddress)) {
+      query.set("launchpadAddress", config.launchpadAddress);
+    }
+    const data = await apiGet(`/api/projects${query.toString() ? `?${query.toString()}` : ""}`);
     mergeProjects(data.projects || []);
     renderTradeTicker();
     renderProjects();
@@ -973,6 +977,7 @@ async function loadBackendProjects() {
 
 async function refreshProjectHolderCounts(limit = 80) {
   const candidates = projects
+    .filter((project) => isCurrentLaunchpadProject(project))
     .filter((project) => project.projectId !== undefined && project.projectId !== null && project.contract)
     .slice(0, limit);
   await Promise.all(candidates.map(async (project) => {
@@ -1005,6 +1010,16 @@ function normalizeAddress(address) {
 
 function isSameAddress(a, b) {
   return normalizeAddress(a) === normalizeAddress(b);
+}
+
+function isCurrentLaunchpadProject(project) {
+  if (!project) {
+    return false;
+  }
+  if (!hasConfiguredAddress(config.launchpadAddress)) {
+    return true;
+  }
+  return isSameAddress(project.launchpadAddress, config.launchpadAddress);
 }
 
 function getKnownLaunchpadAddresses() {
@@ -1777,6 +1792,7 @@ function getProjectTimeValue(project) {
 function getVisibleProjects() {
   const keyword = state.marketSearch.trim().toLowerCase();
   const filtered = projects
+    .filter((project) => isCurrentLaunchpadProject(project))
     .filter((project) => {
       if (state.marketFilter === "all") {
         return true;
@@ -1830,6 +1846,7 @@ function getVisibleProjects() {
 function renderTradeTicker() {
   const items = projects
     .slice()
+    .filter((project) => isCurrentLaunchpadProject(project))
     .filter((project) => Number(project.marketCap || 0) > 0 || Number(project.progress || 0) > 0)
     .sort((a, b) => b.marketCap - a.marketCap)
     .map((project, index) => `
@@ -2496,6 +2513,7 @@ async function loadRanking(force = false) {
     }
     const bnbUsd = await readBnbUsdPrice(provider);
     const launchedProjects = projects
+      .filter((project) => isCurrentLaunchpadProject(project))
       .filter((project) => (project.listed || project.stage === "launched") && ethers.isAddress(project.contract || ""))
       .slice(0, 120);
     const results = [];
@@ -2537,9 +2555,10 @@ async function refreshProfile() {
     return;
   }
 
-  const created = projects.filter((project) => normalizeAddress(project.creator) === wallet);
+  const currentProjects = projects.filter((project) => isCurrentLaunchpadProject(project));
+  const created = currentProjects.filter((project) => normalizeAddress(project.creator) === wallet);
   const tradedMap = new Map();
-  for (const project of projects.slice(0, 80)) {
+  for (const project of currentProjects.slice(0, 80)) {
     if (project.projectId === undefined || project.projectId === null) {
       continue;
     }
@@ -2557,7 +2576,7 @@ async function refreshProfile() {
   if (window.ethers && window.ethereum) {
     try {
       const provider = new ethers.BrowserProvider(window.ethereum);
-      for (const project of projects.slice(0, 80)) {
+      for (const project of currentProjects.slice(0, 80)) {
         if (!ethers.isAddress(project.contract || "")) {
           continue;
         }
