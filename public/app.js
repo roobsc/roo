@@ -5015,6 +5015,7 @@ function bindEvents() {
         state.marketSearch = project.symbol;
         $("#marketSearch").value = project.symbol;
         renderProjects();
+        openTradeModal(project);
       } catch (error) {
         alert(error.message || "没有找到这个代币。");
       } finally {
