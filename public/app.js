@@ -1,6 +1,7 @@
 const config = window.LAUNCHPAD_CONFIG || {};
 const defaultAvatar = "./assets/roo-avatar.jpg";
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+const DEAD_ADDRESS = "0x000000000000000000000000000000000000dEaD";
 const TOTAL_TOKEN_SUPPLY = 10_000;
 const INTERNAL_SALE_SUPPLY = 8_000;
 const WBNB_ADDRESS = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c";
@@ -1997,7 +1998,7 @@ const translations = {
     tabTreasury: "排行榜",
     heroKicker: "roo pouch exchange",
     heroTitle: "袋鼠仓里的公平发射",
-    heroCopy: "BSC 限购内盘、满池发射、LP 测试期进入平台钱包。每个新项目先进入 roo 袋鼠仓，靠成交和曲线自己长出来。",
+    heroCopy: "BSC 限购内盘、满池发射、LP 外盘打入黑洞。每个新项目先进入 roo 袋鼠仓，靠成交和曲线自己长出来。",
     createToken: "创建代币",
     searchPlaceholder: "搜索名称 / 符号 / 合约地址",
     search: "搜索",
@@ -2113,8 +2114,8 @@ const translations = {
     treasuryTaxTitle: "四路分配",
     treasuryTaxCopy: "营销收 BNB；分红自动发给达到 1 枚的持币者；回流 LP 自动进入项目池；销毁代币转入黑洞地址，但总量保持不变。",
     treasuryLaunchKicker: "外盘发射",
-    treasuryLaunchTitle: "LP 测试托管",
-    treasuryLaunchCopy: "测试阶段可用 3-8 BNB 的整数阈值创建 Pancake 流动池，LP token 先发送到平台钱包。",
+    treasuryLaunchTitle: "LP 黑洞",
+    treasuryLaunchCopy: "项目可用 3-8 BNB 的整数阈值创建 Pancake 流动池，外盘 LP token 自动发送到黑洞。",
     profileEyebrow: "个人资料",
     profileTitle: "个人资料",
     profileWalletLabel: "钱包",
@@ -2145,7 +2146,7 @@ const translations = {
     faqInternalQuestion: "什么是内盘发射？",
     faqInternalAnswer: "项目先在 roo 内盘完成限购交易和底池积累，达到设置的 BNB 阈值后再发射到 Pancake Swap。",
     faqLaunchedQuestion: "什么是已发射项目？",
-    faqLaunchedAnswer: "已发射表示发射台合约记录该项目已经迁移到 Pancake Swap；测试阶段外盘 LP 会先进入平台钱包。",
+    faqLaunchedAnswer: "已发射表示发射台合约记录该项目已经迁移到 Pancake Swap；外盘 LP 会进入黑洞地址。",
     faqStorageQuestion: "头像和 K 线数据存在哪里？",
     faqStorageAnswer: "头像保存在 Vercel Blob，项目、交易和 K 线原始成交记录保存在 Neon/Postgres。",
     faqAuditQuestion: "什么是审计代币？",
@@ -2183,7 +2184,7 @@ const translations = {
     tabTreasury: "Ranking",
     heroKicker: "roo pouch exchange",
     heroTitle: "Fair launches from the roo pouch",
-    heroCopy: "BSC limited-buy bonding, pool-triggered launch, and platform-held LP during testing. Every project starts inside roo and grows through real trades.",
+    heroCopy: "BSC limited-buy bonding, pool-triggered launch, and burned external LP. Every project starts inside roo and grows through real trades.",
     createToken: "Create Token",
     searchPlaceholder: "Search name / symbol / contract",
     search: "Search",
@@ -2300,7 +2301,7 @@ const translations = {
     treasuryTaxCopy: "Marketing receives BNB; holders with at least 1 token receive rewards automatically; LP flow returns to the project pool; burn sends tokens to the dead wallet while total supply stays fixed.",
     treasuryLaunchKicker: "External launch",
     treasuryLaunchTitle: "LP test custody",
-    treasuryLaunchCopy: "For testing, projects can launch Pancake liquidity with an integer 3-8 BNB threshold, and LP tokens are sent to the platform wallet.",
+    treasuryLaunchCopy: "Projects can launch Pancake liquidity with an integer 3-8 BNB threshold, and external LP tokens are sent to the burn address.",
     profileEyebrow: "Profile",
     profileTitle: "Profile",
     profileWalletLabel: "Wallet",
@@ -2331,7 +2332,7 @@ const translations = {
     faqInternalQuestion: "What is an internal launch?",
     faqInternalAnswer: "A project first trades inside roo with wallet limits and pool growth, then launches to Pancake Swap after reaching its BNB threshold.",
     faqLaunchedQuestion: "What is a launched project?",
-    faqLaunchedAnswer: "Launched means the launchpad contract records that the project migrated to Pancake Swap; during testing, external LP goes to the platform wallet.",
+    faqLaunchedAnswer: "Launched means the launchpad contract records that the project migrated to Pancake Swap; external LP goes to the burn address.",
     faqStorageQuestion: "Where are avatars and chart data stored?",
     faqStorageAnswer: "Avatars are stored in Vercel Blob. Projects, trades, and candle source records are stored in Neon/Postgres.",
     faqAuditQuestion: "What is an audited token?",
@@ -3470,9 +3471,13 @@ async function refreshOwnerPanel() {
 
   const launchpadInput = $("#ownerLaunchpadAddress");
   const ownerInput = $("#ownerWalletAddress");
+  const lpReceiverInput = $("#ownerLaunchLpReceiver");
   const receiverInput = $("#ownerReceiverAddress");
   if (launchpadInput) {
     launchpadInput.value = config.launchpadAddress || "";
+  }
+  if (lpReceiverInput) {
+    lpReceiverInput.value = "";
   }
   if (receiverInput && !receiverInput.value && hasConfiguredAddress(config.platformFeeWallet)) {
     receiverInput.value = config.platformFeeWallet;
@@ -3506,11 +3511,15 @@ async function refreshOwnerPanel() {
     const provider = new ethers.BrowserProvider(window.ethereum);
     const launchpad = getLaunchpadContract(provider);
     const owner = await launchpad.owner();
+    const lpReceiver = await launchpad.launchLpReceiver();
     state.launchpadOwner = owner || "";
     state.isLaunchpadOwner = !!normalizeAddress(state.wallet) && normalizeAddress(owner) === normalizeAddress(state.wallet);
     panel.hidden = !state.isLaunchpadOwner;
     if (ownerInput) {
       ownerInput.value = owner || "";
+    }
+    if (lpReceiverInput) {
+      lpReceiverInput.value = lpReceiver || "";
     }
     setOwnerPanelButtonsEnabled(state.isLaunchpadOwner);
     if (state.isLaunchpadOwner) {
@@ -4797,6 +4806,9 @@ function bindEvents() {
   $("#ownerUseSelectedToken").addEventListener("click", () => {
     fillOwnerPanelTokenFromSelectedProject();
     setOwnerPanelStatus("已填入当前选中的代币地址。", "success");
+  });
+  $("#ownerSetLpDead").addEventListener("click", async (event) => {
+    await runOwnerPanelAction(event.currentTarget, async (launchpad) => launchpad.setLaunchLpReceiver(DEAD_ADDRESS));
   });
   $("#ownerRetryLaunch").addEventListener("click", async (event) => {
     await runOwnerPanelAction(event.currentTarget, async (launchpad) => launchpad.launchToPancakeByToken(

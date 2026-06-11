@@ -501,6 +501,10 @@
                   <span>当前 Owner</span>
                   <input id="ownerWalletAddress" type="text" readonly />
                 </label>
+                <label class="field">
+                  <span>当前 LP 接收</span>
+                  <input id="ownerLaunchLpReceiver" type="text" readonly />
+                </label>
                 <label class="field full">
                   <span>项目代币地址</span>
                   <input id="ownerTokenAddress" type="text" placeholder="0x..." autocomplete="off" />
@@ -512,6 +516,7 @@
               </div>
               <div class="owner-panel-actions">
                 <button id="ownerUseSelectedToken" class="ghost-action" type="button">使用当前代币</button>
+                <button id="ownerSetLpDead" class="primary-action" type="button">LP 打入黑洞</button>
                 <button id="ownerRetryLaunch" class="primary-action" type="button">重试发射外盘</button>
                 <button id="ownerPauseExternalLp" class="ghost-action" type="button">暂停 LP 处理</button>
                 <button id="ownerResumeExternalLp" class="ghost-action" type="button">恢复 LP 处理</button>
