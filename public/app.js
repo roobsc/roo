@@ -1325,16 +1325,23 @@ async function syncChainProjects(limit = 120) {
     const provider = window.ethereum
       ? new ethers.BrowserProvider(window.ethereum)
       : new ethers.JsonRpcProvider(config.rpcUrl || "https://bsc-dataseed.binance.org");
-    const launchpad = getLaunchpadContract(provider);
-    const count = Number(await launchpad.projectCount());
-    const start = Math.max(0, count - Number(limit || 120));
-    for (let projectId = count - 1; projectId >= start; projectId -= 1) {
+    for (const launchpadAddress of getKnownLaunchpadAddresses()) {
+      const launchpad = getLaunchpadContract(provider, launchpadAddress);
+      let count = 0;
       try {
-        const basics = await launchpad.getProjectBasics(BigInt(projectId));
-        const chainProject = await buildProjectFromChain(projectId, basics, provider, launchpad, config.launchpadAddress);
-        upsertLocalProject(chainProject);
+        count = Number(await launchpad.projectCount());
       } catch {
-        // Keep syncing the rest even if one historical project cannot be read.
+        continue;
+      }
+      const start = Math.max(0, count - Number(limit || 120));
+      for (let projectId = count - 1; projectId >= start; projectId -= 1) {
+        try {
+          const basics = await launchpad.getProjectBasics(BigInt(projectId));
+          const chainProject = await buildProjectFromChain(projectId, basics, provider, launchpad, launchpadAddress);
+          upsertLocalProject(chainProject);
+        } catch {
+          // Keep syncing the rest even if one historical project cannot be read.
+        }
       }
     }
   } finally {
