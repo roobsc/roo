@@ -204,14 +204,25 @@
                   <span data-i18n="avatarSupport">支持 PNG / JPG / WEBP</span>
                 </div>
                 <div class="media-grid">
-                  <label class="avatar-uploader" for="avatarInput">
-                    <input id="avatarInput" type="file" accept="image/png,image/jpeg,image/webp" />
-                    <img id="avatarPreview" src="" alt="Avatar preview" hidden />
-                    <span id="avatarHint" data-i18n="uploadAvatar">上传项目头像</span>
-                  </label>
-                  <div class="avatar-meta">
-                    <strong id="avatarFileName">未选择图片</strong>
-                    <p data-i18n="avatarHelp">创建项目时可以带上头像，预览卡片会同步展示。</p>
+                  <div class="media-identity">
+                    <label class="avatar-uploader" for="avatarInput">
+                      <input id="avatarInput" type="file" accept="image/png,image/jpeg,image/webp" />
+                      <img id="avatarPreview" src="" alt="Avatar preview" hidden />
+                      <span id="avatarHint" data-i18n="uploadAvatar">上传项目头像</span>
+                    </label>
+                    <div class="avatar-meta">
+                      <strong id="avatarFileName">未选择图片</strong>
+                      <p data-i18n="avatarHelp">创建项目时可以带上头像，预览卡片会同步展示。</p>
+                    </div>
+                  </div>
+                  <div class="description-panel">
+                    <div class="section-head compact">
+                      <h2 data-i18n="tokenDescriptionTitle">代币描述</h2>
+                      <strong><span id="tokenDescriptionCount">0</span>/50</strong>
+                    </div>
+                    <label class="field description-field">
+                      <textarea id="tokenDescription" maxlength="50" rows="6" placeholder="输入代币描述" data-i18n-placeholder="tokenDescriptionPlaceholder"></textarea>
+                    </label>
                   </div>
                 </div>
               </section>
@@ -629,6 +640,7 @@
                     <button id="copyTradeContract" class="copy-contract-button" type="button">复制</button>
                     <span id="tradeCreator">创建者 0x000...0000</span>
                   </div>
+                  <div id="tradeHeaderDescription" class="trade-header-description" hidden></div>
                   <div id="tradeMetaRow" class="trade-meta-row" hidden></div>
                 </div>
               </div>

@@ -2215,6 +2215,21 @@ select {
   display: none;
 }
 
+.trade-header-description {
+  margin-top: 10px;
+  max-width: 660px;
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 1px solid rgba(0, 240, 255, 0.16);
+  border-radius: 14px;
+  background: rgba(26, 29, 43, 0.64);
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .trade-meta-chip,
 .trade-meta-link {
   display: inline-flex;
@@ -3026,6 +3041,13 @@ select {
 
 .media-grid {
   display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(280px, 1fr);
+  gap: 18px;
+  align-items: stretch;
+}
+
+.media-identity {
+  display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
   gap: 18px;
   align-items: center;
@@ -3079,6 +3101,40 @@ select {
   margin: 10px 0 0;
   line-height: 1.7;
   font-size: 14px;
+}
+
+.description-panel {
+  display: grid;
+  align-content: stretch;
+  min-height: 220px;
+  padding: 16px;
+  border: 1px solid rgba(0, 240, 255, 0.18);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(177, 0, 255, 0.035));
+}
+
+.description-field,
+.description-field textarea {
+  height: 100%;
+}
+
+.description-field textarea {
+  width: 100%;
+  min-height: 150px;
+  resize: none;
+  padding: 14px 16px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text);
+  font: inherit;
+  line-height: 1.7;
+  outline: none;
+}
+
+.description-field textarea:focus {
+  border-color: rgba(0, 240, 255, 0.72);
+  box-shadow: 0 0 0 3px rgba(0, 240, 255, 0.08), 0 0 18px rgba(0, 240, 255, 0.12);
 }
 
 .slider {
@@ -3387,6 +3443,7 @@ select {
   .hero-grid,
   .form-grid,
   .media-grid,
+  .media-identity,
   .tax-content,
   .flow-grid {
     grid-template-columns: 1fr;

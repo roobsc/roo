@@ -576,6 +576,20 @@ function compactLink(url) {
   }
 }
 
+function normalizeProjectDescription(value) {
+  return String(value || "").trim().slice(0, 50);
+}
+
+function getProjectDescription(project) {
+  const custom = normalizeProjectDescription(project && project.metadata && project.metadata.description);
+  if (custom) {
+    return custom;
+  }
+  return project && project.listed
+    ? t("tradeListedDescription")
+    : t("tradeInternalDescription");
+}
+
 function getProjectBasicsCacheKey(launchpadAddress, projectId) {
   return `${normalizeAddress(launchpadAddress)}:${String(projectId)}`;
 }
@@ -2028,6 +2042,8 @@ const translations = {
     createTitle: "创建限购发射项目",
     updatePreview: "更新预览",
     projectAvatar: "项目头像",
+    tokenDescriptionTitle: "代币描述",
+    tokenDescriptionPlaceholder: "输入代币描述",
     avatarSupport: "支持 PNG / JPG / WEBP",
     uploadAvatar: "上传项目头像",
     noImageSelected: "未选择图片",
@@ -2214,6 +2230,8 @@ const translations = {
     createTitle: "Create a limited-buy launch",
     updatePreview: "Update Preview",
     projectAvatar: "Project Avatar",
+    tokenDescriptionTitle: "Token Description",
+    tokenDescriptionPlaceholder: "Enter token description",
     avatarSupport: "PNG / JPG / WEBP supported",
     uploadAvatar: "Upload project avatar",
     noImageSelected: "No image selected",
@@ -2631,10 +2649,11 @@ function refreshOpenModalTranslations() {
       $("#tradeContract").textContent = `${t("contractLabel")} ${shortAddress(contractAddress)}`;
       $("#copyTradeContract").textContent = t("copyButton");
       $("#tradeCreator").textContent = `${t("creatorLabelFull")} ${project.creator}`;
+      const description = getProjectDescription(project);
+      $("#tradeHeaderDescription").textContent = description;
+      $("#tradeHeaderDescription").hidden = !description;
       renderTradeMetaRow(project);
-      $("#infoDescription").textContent = project.listed
-        ? t("tradeListedDescription")
-        : t("tradeInternalDescription");
+      $("#infoDescription").textContent = description;
     }
   }
 
@@ -4113,9 +4132,10 @@ async function refreshOpenTradeProjectFromChain(project) {
     $("#bondingBar").style.width = `${displayProgress}%`;
     renderTradeMetaRow(freshProject);
     renderProjectSocialLinks(freshProject);
-    $("#infoDescription").textContent = freshProject.listed
-      ? t("tradeListedDescription")
-      : t("tradeInternalDescription");
+    const description = getProjectDescription(freshProject);
+    $("#tradeHeaderDescription").textContent = description;
+    $("#tradeHeaderDescription").hidden = !description;
+    $("#infoDescription").textContent = description;
     updateTradeStats(freshProject, []);
     updateBuyCapQuote(freshProject);
     estimateSwapReceive();
@@ -4145,6 +4165,9 @@ function openTradeModal(project) {
   $("#tradeChange").textContent = formatSignedPercent(project.change);
   $("#tradeChange").className = getChangeBadgeClass(project.change);
   renderTradeMetaRow(project);
+  const description = getProjectDescription(project);
+  $("#tradeHeaderDescription").textContent = description;
+  $("#tradeHeaderDescription").hidden = !description;
   updateTradeStats(project, []);
   const displayProgress = getDisplayProgress(project);
   $("#bondingValue").textContent = `${displayProgress}%`;
@@ -4152,9 +4175,7 @@ function openTradeModal(project) {
   $("#infoName").textContent = project.name;
   $("#infoSymbol").textContent = project.symbol;
   renderProjectSocialLinks(project);
-  $("#infoDescription").textContent = project.listed
-    ? t("tradeListedDescription")
-    : t("tradeInternalDescription");
+  $("#infoDescription").textContent = description;
   if (project.projectId === undefined || project.projectId === null) {
     $("#swapReceive").textContent = t("tradeUnsyncedWarning");
   }
@@ -4300,6 +4321,7 @@ function updateCreateState() {
   const xLink = $("#xLink").value.trim();
   const telegramLink = $("#telegramLink").value.trim();
   const websiteLink = $("#websiteLink").value.trim();
+  const description = normalizeProjectDescription($("#tokenDescription").value);
   const launchThresholdInput = $("#launchThreshold");
   const rawThreshold = launchThresholdInput.value.trim();
 
@@ -4327,6 +4349,8 @@ function updateCreateState() {
   $("#summaryX").textContent = compactLink(xLink);
   $("#summaryTelegram").textContent = compactLink(telegramLink);
   $("#summaryWebsite").textContent = compactLink(websiteLink);
+  $("#tokenDescription").value = description;
+  $("#tokenDescriptionCount").textContent = String(description.length);
   const capCheck = $("#capCheck");
   const thresholdCheck = $("#thresholdCheck");
   if (capCheck) {
@@ -4346,6 +4370,7 @@ function buildMetadata() {
   return {
     avatarFileName: state.avatarFileName || "",
     avatarUrl: state.avatarUrl || "",
+    description: normalizeProjectDescription($("#tokenDescription").value),
     x: $("#xLink").value.trim(),
     telegram: $("#telegramLink").value.trim(),
     website: $("#websiteLink").value.trim()
@@ -5147,6 +5172,7 @@ function bindEvents() {
     "#walletCapSlider",
     "#launchThreshold",
     "#thresholdSlider",
+    "#tokenDescription",
     "#xLink",
     "#telegramLink",
     "#websiteLink",
