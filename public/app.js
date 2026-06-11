@@ -1007,10 +1007,11 @@ function isCurrentLaunchpadProject(project) {
   if (!project) {
     return false;
   }
-  if (!hasConfiguredAddress(config.launchpadAddress)) {
+  const knownLaunchpads = getKnownLaunchpadAddresses();
+  if (!knownLaunchpads.length) {
     return true;
   }
-  return isSameAddress(project.launchpadAddress, config.launchpadAddress);
+  return knownLaunchpads.some((address) => isSameAddress(project.launchpadAddress, address));
 }
 
 function getKnownLaunchpadAddresses() {
