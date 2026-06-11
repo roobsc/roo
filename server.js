@@ -814,21 +814,6 @@ function fastPredictTokenAddress(args) {
   return ethers.getAddress(`0x${addressHash.slice(-40)}`);
 }
 
-async function predictTokenAddressOnChain(args) {
-  const ethers = getEthers();
-  if (!ethers) {
-    throw new Error("ethers dependency is required for on-chain vanity prediction");
-  }
-  const provider = new ethers.JsonRpcProvider("https://bsc.publicnode.com", { chainId: 56, name: "bnb" }, {
-    staticNetwork: true
-  });
-  const abi = [
-    "function predictTokenAddress(string tokenName,string tokenSymbol,bytes32 userSalt,address creator) view returns (address)"
-  ];
-  const contract = new ethers.Contract(args.launchpadAddress, abi, provider);
-  return contract.predictTokenAddress(args.tokenName, args.tokenSymbol, args.userSalt, args.creator);
-}
-
 function findVanitySalt(args) {
   const ethers = getEthers();
   if (!ethers) {
@@ -918,34 +903,6 @@ async function findVanitySaltParallel(args) {
       });
     }
   });
-}
-
-async function findVanitySaltResilient(args) {
-  return findVanitySaltOnChain(args);
-}
-
-async function findVanitySaltOnChain(args) {
-  const ethers = getEthers();
-  if (!ethers) {
-    throw new Error("ethers dependency is required for vanity salt generation");
-  }
-  if (!ethers.isAddress(args.launchpadAddress) || !ethers.isAddress(args.creator)) {
-    throw new Error("Invalid launchpad or creator address");
-  }
-  const suffix = String(args.suffix || "0000").toLowerCase().replace(/^0x/, "");
-  if (!/^[0-9a-f]{1,8}$/.test(suffix)) {
-    throw new Error("Invalid vanity suffix");
-  }
-  const maxAttempts = Math.min(Number(args.maxAttempts || 240000), 1_000_000);
-  const seed = `${args.creator}:${args.tokenName}:${args.tokenSymbol}:${Date.now()}:${Math.random()}`;
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const userSalt = ethers.keccak256(ethers.toUtf8Bytes(`${seed}:${attempt}`));
-    const predicted = await predictTokenAddressOnChain({ ...args, userSalt });
-    if (String(predicted).toLowerCase().endsWith(suffix)) {
-      return { userSalt, predicted, attempts: attempt + 1, suffix, workers: 1, mode: "onchain" };
-    }
-  }
-  throw new Error(`No vanity salt found on-chain in ${maxAttempts} attempts`);
 }
 
 async function submitTokenVerification(args) {
@@ -1221,7 +1178,7 @@ async function handleApi(req, res, url) {
   if (req.method === "POST" && url.pathname === "/api/vanity-salt") {
     const payload = await readJsonBody(req);
     const startedAt = Date.now();
-    const requestArgs = {
+    const result = await findVanitySaltParallel({
       launchpadAddress: payload.launchpadAddress,
       creator: payload.creator,
       tokenName: payload.tokenName,
@@ -1230,16 +1187,14 @@ async function handleApi(req, res, url) {
       initCodeHash: payload.initCodeHash || "",
       suffix: payload.suffix || "0000",
       maxAttempts: payload.maxAttempts || 240000
-    };
-    const result = await findVanitySaltResilient(requestArgs);
+    });
     result.elapsedMs = Date.now() - startedAt;
     console.log("vanity-salt", JSON.stringify({
       suffix: result.suffix,
       attempts: result.attempts,
       workers: result.workers,
       elapsedMs: result.elapsedMs,
-      predicted: result.predicted,
-      mode: result.mode || "local"
+      predicted: result.predicted
     }));
     return sendJson(res, 200, result);
   }

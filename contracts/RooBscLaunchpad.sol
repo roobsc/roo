@@ -602,7 +602,7 @@ contract LaunchpadToken {
  * @notice BSC meme launchpad prototype:
  * - Fixed project supply: 10,000 tokens.
  * - Creator chooses one-wallet buy cap from 1 to 100 tokens.
- * - Creator chooses a launch threshold of 3/5/8 BNB, plus an optional 0.03 BNB test threshold.
+ * - Creator chooses a manual integer launch threshold from 3 to 8 BNB in testing mode.
  * - Internal market buy/sell charges 1% platform BNB tax.
  * - After launch, platform tax is disabled and LP tokens are sent to a configurable receiver.
  * - Project mechanism tax pays marketing in BNB, auto-pays holder dividends, and returns LP tax to the pool.
@@ -614,7 +614,6 @@ contract RooBscLaunchpad {
     uint256 private constant LAUNCH_SOLD_FLOOR = 7_999 ether;
     uint256 private constant MIN_WALLET_CAP = 1 ether;
     uint256 private constant MAX_WALLET_CAP = 100 ether;
-    uint256 private constant TEST_LAUNCH_THRESHOLD = 0.03 ether;
     uint256 private constant MIN_LAUNCH_THRESHOLD = 3 ether;
     uint256 private constant MAX_LAUNCH_THRESHOLD = 8 ether;
     uint16 private constant LAUNCH_SHORTFALL_BPS = 1;
@@ -778,6 +777,18 @@ contract RooBscLaunchpad {
         return _predictTokenAddress(tokenName, tokenSymbol, _scopedSalt(creator, userSalt));
     }
 
+    function launchpadTokenInitCodeHash(
+        string calldata tokenName,
+        string calldata tokenSymbol
+    ) external view returns (bytes32) {
+        return keccak256(
+            abi.encodePacked(
+                type(LaunchpadToken).creationCode,
+                abi.encode(tokenName, tokenSymbol, TOKEN_SUPPLY, address(this))
+            )
+        );
+    }
+
     function owner() external view returns (address) {
         return _owner;
     }
@@ -796,7 +807,8 @@ contract RooBscLaunchpad {
             if (config.walletCapTokens != 0) revert LErr(7);
             walletCap = 0;
         }
-        if (!_isValidLaunchThreshold(launchThreshold)) revert LErr(8);
+        if (launchThreshold < MIN_LAUNCH_THRESHOLD || launchThreshold > MAX_LAUNCH_THRESHOLD) revert LErr(8);
+        if (launchThreshold % 1 ether != 0) revert LErr(8);
         _validateTaxSettings(taxConfig.taxEnabled, taxConfig.projectTaxBps, taxConfig.allocation);
         if (taxConfig.taxEnabled && taxConfig.allocation.marketingBps > 0) {
             if (config.marketingWallet == address(0)) revert LErr(9);
@@ -1285,16 +1297,6 @@ contract RooBscLaunchpad {
             return type(uint16).max;
         }
         return uint16(bps);
-    }
-
-    function _isValidLaunchThreshold(uint256 launchThreshold) private pure returns (bool) {
-        if (launchThreshold == TEST_LAUNCH_THRESHOLD) {
-            return true;
-        }
-        if (launchThreshold < MIN_LAUNCH_THRESHOLD || launchThreshold > MAX_LAUNCH_THRESHOLD) {
-            return false;
-        }
-        return launchThreshold % 1 ether == 0;
     }
 
     function _sendValue(address to, uint256 amount) private {
