@@ -602,7 +602,7 @@ contract LaunchpadToken {
  * @notice BSC meme launchpad prototype:
  * - Fixed project supply: 10,000 tokens.
  * - Creator chooses one-wallet buy cap from 1 to 100 tokens.
- * - Creator chooses manual launch threshold from 0.05 to 8 BNB in testing mode.
+ * - Creator chooses a manual integer launch threshold from 3 to 8 BNB in testing mode.
  * - Internal market buy/sell charges 1% platform BNB tax.
  * - After launch, platform tax is disabled and LP tokens are sent to a configurable receiver.
  * - Project mechanism tax pays marketing in BNB, auto-pays holder dividends, and returns LP tax to the pool.
@@ -614,7 +614,7 @@ contract RooBscLaunchpad {
     uint256 private constant LAUNCH_SOLD_FLOOR = 7_999 ether;
     uint256 private constant MIN_WALLET_CAP = 1 ether;
     uint256 private constant MAX_WALLET_CAP = 100 ether;
-    uint256 private constant MIN_LAUNCH_THRESHOLD = 0.05 ether;
+    uint256 private constant MIN_LAUNCH_THRESHOLD = 3 ether;
     uint256 private constant MAX_LAUNCH_THRESHOLD = 8 ether;
     uint16 private constant LAUNCH_SHORTFALL_BPS = 1;
     uint16 private constant PLATFORM_TAX_BPS = 100;
@@ -808,6 +808,7 @@ contract RooBscLaunchpad {
             walletCap = 0;
         }
         if (launchThreshold < MIN_LAUNCH_THRESHOLD || launchThreshold > MAX_LAUNCH_THRESHOLD) revert LErr(8);
+        if (launchThreshold % 1 ether != 0) revert LErr(8);
         _validateTaxSettings(taxConfig.taxEnabled, taxConfig.projectTaxBps, taxConfig.allocation);
         if (taxConfig.taxEnabled && taxConfig.allocation.marketingBps > 0) {
             if (config.marketingWallet == address(0)) revert LErr(9);

@@ -7,7 +7,7 @@ window.LAUNCHPAD_CONFIG = {
   pancakeRouter: "0x10ED43C718714eb63d5aA57B78B54704E256024E",
   apiBaseUrl: "",
   bnbSymbol: "BNB",
-  defaultLaunchThresholdBnb: 0.05,
+  defaultLaunchThresholdBnb: 3,
   defaultBuyCapTokens: 25,
   platformTaxBps: 100
 };

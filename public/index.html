@@ -161,7 +161,7 @@
               <div class="market-extra-filters" aria-label="Project filters">
                 <select id="hardCapFilter" aria-label="Hard cap filter">
                   <option value="all" data-i18n="filterHardCapAll">硬顶</option>
-                  <option value="low">0.05-4 BNB</option>
+                  <option value="low">3-4 BNB</option>
                   <option value="mid">4-6 BNB</option>
                   <option value="high">6-8 BNB</option>
                 </select>
@@ -227,7 +227,7 @@
                 </label>
                 <label class="field">
                   <span data-i18n="launchPoolBnb">发射底池 BNB</span>
-                  <input id="launchThreshold" type="number" min="0.05" max="8" step="0.01" value="0.05" />
+                  <input id="launchThreshold" type="number" min="3" max="8" step="1" value="3" />
                 </label>
               </div>
 
@@ -278,15 +278,15 @@
               <section class="range-section">
                 <div class="section-head compact">
                   <h2 data-i18n="launchThresholdTitle">发射阈值</h2>
-                  <strong><span id="thresholdValue">0.05</span> BNB</strong>
+                  <strong><span id="thresholdValue">3</span> BNB</strong>
                 </div>
-                <input id="thresholdSlider" class="slider" type="range" min="0.05" max="8" step="0.01" value="0.05" />
+                <input id="thresholdSlider" class="slider" type="range" min="3" max="8" step="1" value="3" />
                 <div class="threshold-pills">
-                  <span>0.05 BNB</span>
-                  <span>1</span>
                   <span>3</span>
                   <span>4</span>
+                  <span>5</span>
                   <span>6</span>
+                  <span>7</span>
                   <span>8 BNB</span>
                 </div>
               </section>
@@ -390,7 +390,7 @@
                 </div>
                 <div>
                   <dt data-i18n="summaryLaunchPool">发射底池</dt>
-                  <dd><span id="summaryThreshold">5</span> BNB</dd>
+                  <dd><span id="summaryThreshold">3</span> BNB</dd>
                 </div>
                 <div>
                   <dt>X</dt>
@@ -449,7 +449,7 @@
               <article class="flow-card">
                 <span data-i18n="treasuryLaunchKicker">外盘发射</span>
                 <h2 data-i18n="treasuryLaunchTitle">LP 黑洞</h2>
-                <p data-i18n="treasuryLaunchCopy">测试阶段可用 0.05-8 BNB 的手动阈值创建 Pancake 流动池，LP token 发送到黑洞。</p>
+                <p data-i18n="treasuryLaunchCopy">测试阶段可用 3-8 BNB 的整数阈值创建 Pancake 流动池，LP token 发送到黑洞。</p>
               </article>
             </div>
           </div>

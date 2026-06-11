@@ -483,7 +483,7 @@ const state = {
   launchpadOwner: "",
   isLaunchpadOwner: false,
   cap: Number(config.defaultBuyCapTokens || 25),
-  threshold: Number(config.defaultLaunchThresholdBnb || 5),
+  threshold: Number(config.defaultLaunchThresholdBnb || 3),
   avatarUrl: "",
   avatarFileName: "",
   walletCapEnabled: true,
@@ -2097,7 +2097,7 @@ const translations = {
     treasuryTaxCopy: "营销收 BNB；分红自动发给达到 1 枚的持币者；回流 LP 自动进入项目池；销毁代币转入黑洞地址，但总量保持不变。",
     treasuryLaunchKicker: "外盘发射",
     treasuryLaunchTitle: "LP 测试托管",
-    treasuryLaunchCopy: "测试阶段可用 0.05-8 BNB 的手动阈值创建 Pancake 流动池，LP token 先发送到平台钱包。",
+    treasuryLaunchCopy: "测试阶段可用 3-8 BNB 的整数阈值创建 Pancake 流动池，LP token 先发送到平台钱包。",
     profileEyebrow: "个人资料",
     profileTitle: "个人资料",
     profileWalletLabel: "钱包",
@@ -2283,7 +2283,7 @@ const translations = {
     treasuryTaxCopy: "Marketing receives BNB; holders with at least 1 token receive rewards automatically; LP flow returns to the project pool; burn sends tokens to the dead wallet while total supply stays fixed.",
     treasuryLaunchKicker: "External launch",
     treasuryLaunchTitle: "LP test custody",
-    treasuryLaunchCopy: "For testing, projects can launch Pancake liquidity with a manual 0.05-8 BNB threshold, and LP tokens are sent to the platform wallet.",
+    treasuryLaunchCopy: "For testing, projects can launch Pancake liquidity with an integer 3-8 BNB threshold, and LP tokens are sent to the platform wallet.",
     profileEyebrow: "Profile",
     profileTitle: "Profile",
     profileWalletLabel: "Wallet",
@@ -4272,16 +4272,22 @@ function updateCreateState() {
   const xLink = $("#xLink").value.trim();
   const telegramLink = $("#telegramLink").value.trim();
   const websiteLink = $("#websiteLink").value.trim();
+  const launchThresholdInput = $("#launchThreshold");
+  const rawThreshold = launchThresholdInput.value.trim();
 
   state.walletCapEnabled = $("#walletCapEnabled").checked;
   state.cap = clampNumber($("#walletCap").value, 1, 100);
-  state.threshold = clampNumber($("#launchThreshold").value, 0.05, 8);
-  state.threshold = Number(state.threshold.toFixed(2));
+  if (rawThreshold) {
+    state.threshold = clampNumber(rawThreshold, 3, 8);
+    state.threshold = Math.round(state.threshold);
+  }
 
   $("#walletCapSettings").hidden = !state.walletCapEnabled;
   $("#walletCap").value = state.cap;
   $("#walletCapSlider").value = state.cap;
-  $("#launchThreshold").value = state.threshold;
+  if (rawThreshold) {
+    $("#launchThreshold").value = state.threshold;
+  }
   $("#thresholdSlider").value = state.threshold;
 
   $("#capValue").textContent = state.cap;
@@ -4299,7 +4305,9 @@ function updateCreateState() {
     capCheck.checked = !state.walletCapEnabled || (state.cap >= 1 && state.cap <= 100);
   }
   if (thresholdCheck) {
-    thresholdCheck.checked = state.threshold >= 0.05 && state.threshold <= 8;
+    thresholdCheck.checked = rawThreshold
+      ? state.threshold >= 3 && state.threshold <= 8
+      : false;
   }
 
   renderStepPills();
@@ -4497,10 +4505,13 @@ function parseProjectCreated(receipt, contract) {
 
 async function getLaunchThresholdArgument(launchpad, thresholdBnb) {
   const thresholdWei = ethers.parseEther(String(thresholdBnb));
-  const minThreshold = ethers.parseEther("0.05");
+  const minThreshold = ethers.parseEther("3");
   const maxThreshold = ethers.parseEther("8");
   if (thresholdWei < minThreshold || thresholdWei > maxThreshold) {
-    throw new Error("创建阈值必须在 0.05 BNB 到 8 BNB 之间。");
+    throw new Error("创建阈值必须在 3 BNB 到 8 BNB 之间，且只能填写整数。");
+  }
+  if (!Number.isInteger(Number(thresholdBnb))) {
+    throw new Error("创建阈值必须是 3 到 8 之间的整数。");
   }
   return thresholdWei;
 }
@@ -5119,6 +5130,16 @@ function bindEvents() {
       }
       updateCreateState();
     });
+  });
+
+  $("#launchThreshold").addEventListener("blur", () => {
+    const input = $("#launchThreshold");
+    const raw = input.value.trim();
+    const next = raw ? clampNumber(raw, 3, 8) : 3;
+    state.threshold = Math.round(next);
+    input.value = state.threshold;
+    $("#thresholdSlider").value = state.threshold;
+    updateCreateState();
   });
 
   ["#walletTax", "#burnTax", "#rewardTax", "#lpTax"].forEach((selector) => {
