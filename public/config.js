@@ -5,7 +5,7 @@ window.LAUNCHPAD_CONFIG = {
   legacyLaunchpadAddresses: [],
   platformFeeWallet: "0x05aA5C72a716D9c7EE93802F779fFF998520d74e",
   pancakeRouter: "0x10ED43C718714eb63d5aA57B78B54704E256024E",
-  ownerAddress: "0x116f111baa44ecef84ead53e17f7c523dbe360d2",
+  ownerAddress: "0x13a6462b31878f2c515Dc9ED219B1C956f58d78C",
   rpcUrl: "https://bsc.publicnode.com",
   apiBaseUrl: "",
   bnbSymbol: "BNB",

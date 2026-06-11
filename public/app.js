@@ -1513,29 +1513,92 @@ function parsePositiveEtherInput(value) {
   return { text, wei };
 }
 
-function estimateInitialBuyTokens(bnbAmount, params) {
-  const bnb = Number(bnbAmount || 0);
-  const launchThreshold = Number(params.launchThresholdBnb || state.threshold || 0);
-  if (!Number.isFinite(bnb) || bnb <= 0 || !Number.isFinite(launchThreshold) || launchThreshold <= 0) {
-    return 0;
+function ceilDivBigInt(a, b) {
+  if (b === 0n) {
+    throw new Error("Division by zero");
   }
-  const projectTaxBps = Number(params.projectMechanismTaxBps || 0);
-  const totalTaxBps = 100 + projectTaxBps;
-  const poolBudget = bnb * (10_000 - totalTaxBps) / 10_000;
-  const supply = INTERNAL_SALE_SUPPLY;
-  const maxTokens = supply;
-  let low = 0;
-  let high = maxTokens;
-  for (let index = 0; index < 80; index += 1) {
-    const mid = (low + high) / 2;
-    const poolCost = estimateCurvePoolCostLocal(mid, 0, launchThreshold);
-    if (poolCost <= poolBudget) {
+  return (a + b - 1n) / b;
+}
+
+function getCreateBnbProjectTaxBps(params) {
+  if (!params || !params.taxEnabled) {
+    return 0n;
+  }
+  const projectTaxBps = BigInt(params.projectMechanismTaxBps || 0);
+  const allocation = params.taxAllocationBps || {};
+  const bnbAllocationBps = BigInt(
+    Number(allocation.marketingWalletBnb || 0)
+    + Number(allocation.holderDividendsAutoBnb || 0)
+    + Number(allocation.autoLpBnb || 0)
+  );
+  return (projectTaxBps * bnbAllocationBps) / 10000n;
+}
+
+function estimateCurvePoolCostExactWei(tokenAmountWei, startSoldWei, launchThresholdWei) {
+  const tokenAmount = BigInt(tokenAmountWei || 0n);
+  const startSold = BigInt(startSoldWei || 0n);
+  const launchThreshold = BigInt(launchThresholdWei || 0n);
+  if (tokenAmount <= 0n || launchThreshold <= 0n || startSold < 0n) {
+    return 0n;
+  }
+  const supply = ethers.parseEther(String(INTERNAL_SALE_SUPPLY));
+  const bpsDenominator = 10000n;
+  const curveBaseBps = 5000n;
+  const curveSlopeBps = 10000n;
+  const endSold = startSold + tokenAmount;
+  if (endSold > supply) {
+    return 0n;
+  }
+  const baseAmount = (tokenAmount * launchThreshold * curveBaseBps) / (supply * bpsDenominator);
+  const area = (endSold * endSold) - (startSold * startSold);
+  const slopeAmount =
+    (launchThreshold * curveSlopeBps * area) /
+    (2n * supply * supply * bpsDenominator);
+  return baseAmount + slopeAmount;
+}
+
+function estimateInitialBuyTokensExactWei(bnbWei, params) {
+  const maxBnbWei = BigInt(bnbWei || 0n);
+  if (maxBnbWei <= 0n || !params || !window.ethers) {
+    return 0n;
+  }
+  const launchThresholdWei = params.launchThresholdWei
+    ? BigInt(params.launchThresholdWei)
+    : ethers.parseEther(String(params.launchThresholdBnb || state.threshold || 0));
+  if (launchThresholdWei <= 0n) {
+    return 0n;
+  }
+  const totalTaxBps = 100n + getCreateBnbProjectTaxBps(params);
+  const netBps = 10000n - totalTaxBps;
+  if (netBps <= 0n) {
+    return 0n;
+  }
+  const supply = ethers.parseEther(String(INTERNAL_SALE_SUPPLY));
+  let low = 0n;
+  let high = supply;
+  for (let index = 0; index < 80 && low < high; index += 1) {
+    const mid = (low + high + 1n) / 2n;
+    const poolCost = estimateCurvePoolCostExactWei(mid, 0n, launchThresholdWei);
+    const grossCost = ceilDivBigInt(poolCost * 10000n, netBps);
+    if (grossCost <= maxBnbWei) {
       low = mid;
     } else {
-      high = mid;
+      high = mid - 1n;
     }
   }
-  return Math.max(0, Math.min(maxTokens, low));
+  return low;
+}
+
+function estimateInitialBuyTokens(bnbAmount, params) {
+  if (!window.ethers) {
+    return 0;
+  }
+  const parsed = parsePositiveEtherInput(String(bnbAmount || ""));
+  if (!parsed) {
+    return 0;
+  }
+  const tokenAmountWei = estimateInitialBuyTokensExactWei(parsed.wei, params);
+  return Number(ethers.formatEther(tokenAmountWei));
 }
 
 function estimateCurvePoolCostLocal(tokenAmount, startSold, launchThreshold) {
@@ -3500,7 +3563,7 @@ async function refreshOwnerPanel() {
       fillOwnerPanelTokenFromSelectedProject();
       setOwnerPanelStatus("Owner fallback active.", "success");
     } else {
-      setOwnerPanelStatus("仅合约 owner 可执行这些管理操作。");
+      setOwnerPanelStatus("??? owner ??????????");
     }
     return;
   }
@@ -3519,68 +3582,60 @@ async function refreshOwnerPanel() {
       fillOwnerPanelTokenFromSelectedProject();
       setOwnerPanelStatus("Owner fallback active.", "success");
     } else {
-      setOwnerPanelStatus("仅合约 owner 可执行这些管理操作。");
+      setOwnerPanelStatus("??? owner ??????????");
     }
     return;
   }
 
-  try {
-    let owner = "";
-    let lpReceiver = "";
+  let owner = "";
+  let lpReceiver = "";
+  const providers = [];
+  if (window.ethers && window.ethereum) {
+    providers.push(new ethers.BrowserProvider(window.ethereum));
+  }
+  if (config.rpcUrl) {
+    providers.push(new ethers.JsonRpcProvider(config.rpcUrl));
+  }
 
-    try {
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const launchpad = getLaunchpadContract(provider);
-      [owner, lpReceiver] = await Promise.all([
-        launchpad.owner(),
-        launchpad.launchLpReceiver()
-      ]);
-    } catch {
-      if (config.rpcUrl) {
-        const provider = new ethers.JsonRpcProvider(config.rpcUrl);
-        const launchpad = getLaunchpadContract(provider);
-        [owner, lpReceiver] = await Promise.all([
-          launchpad.owner(),
-          launchpad.launchLpReceiver()
-        ]);
+  for (const provider of providers) {
+    const launchpad = getLaunchpadContract(provider);
+    if (!owner) {
+      try {
+        owner = await launchpad.owner();
+      } catch {
+        // Ignore owner read failure and continue with other fallbacks.
       }
     }
+    if (!lpReceiver) {
+      try {
+        lpReceiver = await launchpad.launchLpReceiver();
+      } catch {
+        // Ignore LP receiver read failure for partial deployments.
+      }
+    }
+    if (owner && lpReceiver) {
+      break;
+    }
+  }
 
-    const effectiveOwner = owner || configuredOwner;
-    state.launchpadOwner = effectiveOwner || "";
-    state.isLaunchpadOwner = !!normalizeAddress(state.wallet)
-      && !!normalizeAddress(effectiveOwner)
-      && normalizeAddress(effectiveOwner) === normalizeAddress(state.wallet);
-    panel.hidden = !state.isLaunchpadOwner;
-    if (ownerInput) {
-      ownerInput.value = effectiveOwner || "";
-    }
-    if (lpReceiverInput) {
-      lpReceiverInput.value = lpReceiver || "";
-    }
-    setOwnerPanelButtonsEnabled(state.isLaunchpadOwner);
-    if (state.isLaunchpadOwner) {
-      fillOwnerPanelTokenFromSelectedProject();
-      setOwnerPanelStatus(owner ? "当前钱包就是合约 owner，可以操作 LP 处理和分红救援。" : "Owner fallback active.", "success");
-    } else {
-      setOwnerPanelStatus("仅合约 owner 可执行这些管理操作。");
-    }
-  } catch (error) {
-    state.launchpadOwner = configuredOwner || "";
-    state.isLaunchpadOwner = !!normalizeAddress(state.wallet)
-      && !!normalizeAddress(configuredOwner)
-      && normalizeAddress(configuredOwner) === normalizeAddress(state.wallet);
-    panel.hidden = !state.isLaunchpadOwner;
-    if (ownerInput) {
-      ownerInput.value = configuredOwner || "";
-    }
-    setOwnerPanelButtonsEnabled(state.isLaunchpadOwner);
-    if (state.isLaunchpadOwner) {
-      fillOwnerPanelTokenFromSelectedProject();
-      setOwnerPanelStatus("Owner fallback active.", "success");
-    } else {
-      setOwnerPanelStatus("仅合约 owner 可执行这些管理操作。");
-    }
+  const effectiveOwner = owner || configuredOwner;
+  state.launchpadOwner = effectiveOwner || "";
+  state.isLaunchpadOwner = !!normalizeAddress(state.wallet)
+    && !!normalizeAddress(effectiveOwner)
+    && normalizeAddress(effectiveOwner) === normalizeAddress(state.wallet);
+  panel.hidden = !state.isLaunchpadOwner;
+  if (ownerInput) {
+    ownerInput.value = effectiveOwner || "";
+  }
+  if (lpReceiverInput) {
+    lpReceiverInput.value = lpReceiver || "";
+  }
+  setOwnerPanelButtonsEnabled(state.isLaunchpadOwner);
+  if (state.isLaunchpadOwner) {
+    fillOwnerPanelTokenFromSelectedProject();
+    setOwnerPanelStatus(owner ? "???????? owner????? LP ????????" : "Owner fallback active.", "success");
+  } else {
+    setOwnerPanelStatus("??? owner ??????????");
   }
 }
 
@@ -4656,25 +4711,26 @@ async function submitCreateTokenWithDevBuy() {
   });
 
   try {
-    const devBuyBnb = Math.max(0, Number($("#devBuyBnbModal").value || 0));
-    if (!Number.isFinite(devBuyBnb) || devBuyBnb <= 0) {
-      throw new Error("请输入大于 0 的首买 BNB 金额。");
+    const devBuyInput = parsePositiveEtherInput($("#devBuyBnbModal").value || "");
+    if (!devBuyInput) {
+      throw new Error("????? 0 ??? BNB ???");
     }
     setCreateStatus(t("createConnectStatus"), "");
     const wallet = await connectWallet();
     const params = state.pendingCreateParams || buildCreateParams(wallet);
-    const tokenAmountEstimate = estimateInitialBuyTokens(devBuyBnb, params);
-    if (tokenAmountEstimate <= 0) {
-      throw new Error("首买金额太小，请提高 BNB 金额。");
+    const tokenAmountEstimateWei = estimateInitialBuyTokensExactWei(devBuyInput.wei, params);
+    if (tokenAmountEstimateWei <= 0n) {
+      throw new Error("?????????? BNB ???");
     }
+    const devBuyBnb = Number(devBuyInput.text);
     setCreateStatus(
       devBuyBnb >= Number(params.launchThresholdBnb || 0)
         ? t("devBuyThresholdWarning").replace("{threshold}", formatBnb(params.launchThresholdBnb))
         : t("devBuyCreatingStatus"),
       devBuyBnb >= Number(params.launchThresholdBnb || 0) ? "warning" : ""
     );
-    params.devBuyBnb = String(devBuyBnb);
-    params.devBuyTokenAmount = ethers.parseEther(String(tokenAmountEstimate.toFixed(12))).toString();
+    params.devBuyBnb = devBuyInput.text;
+    params.devBuyTokenAmount = tokenAmountEstimateWei.toString();
     validateCreateRequest(params);
     renderParams(wallet);
 
@@ -4722,11 +4778,11 @@ async function submitCreateTokenWithDevBuy() {
         projectTaxConfig,
         vanity.userSalt,
         BigInt(params.devBuyTokenAmount),
-        { value: ethers.parseEther(String(devBuyBnb)) + ethers.parseEther("0.01") }
+        { value: devBuyInput.wei + ethers.parseEther("0.01") }
       );
     } catch (error) {
       if (String(error.message || "").includes("createProjectVanityAndBuy")) {
-        throw new Error("当前发射台合约不是新版，不支持创建时 dev 第一笔买入。请先重新部署新合约并更新 config.js。");
+        throw new Error("??????????????????? dev ?????????????????? config.js?");
       }
       throw error;
     }
