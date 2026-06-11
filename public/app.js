@@ -8,6 +8,51 @@ const WBNB_ADDRESS = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c";
 const USDT_ADDRESS = "0x55d398326f99059fF775485246999027B3197955";
 const PANCAKE_V2_FACTORY = "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73";
 const BNB_USD_FALLBACK = Number(config.bnbUsd || 600);
+const MANUAL_PROJECTS = [
+  {
+    cap: 5,
+    name: "ROO",
+    stage: "launched",
+    avatar: "R",
+    change: 371,
+    listed: true,
+    raised: "0.000 / 8 BNB",
+    status: "已发射",
+    symbol: "ROO",
+    creator: "0x13a6462b31878f2c515Dc9ED219B1C956f58d78C",
+    holders: 233,
+    contract: "0x86CcF459D1219503F406a138FB3CD51f013B0000",
+    metadata: {
+      x: "https://x.com/Roolaunch",
+      website: "https://www.roolaunch.com/",
+      telegram: "https://t.me/ROO6888",
+      avatarUrl: "https://gyciihoyiebouh8x.public.blob.vercel-storage.com/avatars/1781185125646-roo.jpg",
+      avatarFileName: "微信图片_20260611203814_5053_5.jpg"
+    },
+    priceBnb: 0,
+    progress: 100,
+    avatarUrl: "https://gyciihoyiebouh8x.public.blob.vercel-storage.com/avatars/1781185125646-roo.jpg",
+    bnbRaised: 0,
+    createdAt: "2026-06-11T13:38:42.615Z",
+    marketCap: 2400,
+    projectId: "2",
+    updatedAt: "2026-06-11T15:17:52.130Z",
+    volume24h: 61633.5,
+    taxEnabled: true,
+    tokensSold: 8000,
+    pairAddress: "0xD39B0d7fa1AC2b34f426E49B305Fc899e0A32da6",
+    totalSupply: 10000,
+    dividendInfo: {
+      supported: true,
+      withdrawableBnb: null,
+      totalDistributedBnb: 0
+    },
+    liquidityUsd: 0,
+    projectTaxBps: 300,
+    dividendTaxBps: 0,
+    launchpadAddress: "0x1DfD303bfA5210c33b651A5DD10621B5766E04C9"
+  }
+];
 
 const LAUNCHPAD_ABI = [
   {
@@ -954,7 +999,7 @@ async function loadBackendProjects() {
       query.append("launchpadAddress", address);
     });
     const data = await apiGet(`/api/projects${query.toString() ? `?${query.toString()}` : ""}`);
-    mergeProjects(data.projects || []);
+    mergeProjects([...(data.projects || []), ...MANUAL_PROJECTS]);
     renderTradeTicker();
     renderProjects();
     refreshProjectHolderCounts();
