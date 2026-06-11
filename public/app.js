@@ -4933,17 +4933,6 @@ function bindEvents() {
       getOwnerPanelReceiverAddress()
     ));
   });
-  $("#ownerResetDividends").addEventListener("click", async (event) => {
-    const confirmed = window.confirm("这会清空当前所有地址的可领分红，并把当前未领取分红 BNB 转到接收地址。后续新分红仍会继续累计。是否继续？");
-    if (!confirmed) {
-      return;
-    }
-    await runOwnerPanelAction(event.currentTarget, async (launchpad) => launchpad.resetDividendsAndSweepByToken(
-      getOwnerPanelTokenAddress(),
-      getOwnerPanelReceiverAddress()
-    ));
-  });
-
   $$("[data-open-create]").forEach((button) => {
     button.addEventListener("click", () => updateTabs("create"));
   });
