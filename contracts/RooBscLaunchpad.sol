@@ -90,7 +90,6 @@ contract LaunchpadToken {
         uint16 taxBps,
         uint256 tokenThreshold
     );
-    event ExternalLpProcessingUpdated(bool enabled);
     event ExternalAutoLiquidityAdded(
         uint256 swapTokenAmount,
         uint256 liquidityTokenAmount,
@@ -213,15 +212,6 @@ contract LaunchpadToken {
         emit ExternalLpConfigured(router, pair, receiver, projectTaxBps, tokenThreshold);
     }
 
-    function launchpadSetExternalLpProcessingEnabled(bool enabled) external onlyLaunchpad {
-        externalLpProcessingEnabled = enabled && externalLpEnabled;
-        emit ExternalLpProcessingUpdated(externalLpProcessingEnabled);
-    }
-
-    function launchpadProcessExternalLp() external onlyLaunchpad {
-        _maybeProcessExternalLp(address(0), address(0));
-    }
-
     function launchpadSweepPendingExternalLpFees(address receiver) external onlyLaunchpad {
         if (receiver == address(0)) revert TErr(11);
         uint256 tokenAmount = _balances[address(this)];
@@ -254,25 +244,6 @@ contract LaunchpadToken {
         return _claimDividend(payable(msg.sender), false);
     }
 
-    function launchpadResetDividendsAndSweep(address receiver) external onlyLaunchpad {
-        if (receiver == address(0)) revert TErr(11);
-        uint256 amount = reservedDividendBalance;
-        uint256 balance = address(this).balance;
-        if (amount > balance) {
-            amount = balance;
-        }
-        reservedDividendBalance = 0;
-        pendingDividendReserve = 0;
-        magnifiedDividendPerShare = 0;
-        unchecked {
-            dividendEpoch += 1;
-        }
-        if (amount > 0) {
-            (bool ok, ) = payable(receiver).call{value: amount}("");
-            if (!ok) revert TErr(12);
-        }
-    }
-
     function _transfer(address from, address to, uint256 amount) private {
         if (to == address(0)) revert TErr(13);
         uint256 balance = _balances[from];
@@ -292,6 +263,19 @@ contract LaunchpadToken {
             externalWalletCap > 0
             && from == externalLpPair
             && to != externalLpReceiver
+            && _balances[to] + receivedAmount > externalWalletCap
+        ) {
+            revert TErr(17);
+        }
+
+        if (
+            externalWalletCap > 0
+            && from != externalLpPair
+            && from != address(this)
+            && from != launchpad
+            && to != externalLpPair
+            && to != externalLpReceiver
+            && to != BURN_ADDRESS
             && _balances[to] + receivedAmount > externalWalletCap
         ) {
             revert TErr(17);
@@ -1019,20 +1003,6 @@ contract RooBscLaunchpad {
         _rescueLaunchLiquidity(projectId, platformFeeWallet);
     }
 
-    function setProjectExternalLpProcessingByToken(address token, bool enabled) external onlyOwner {
-        uint256 projectId = _projectIdByToken(token);
-        Project storage project = projects[projectId];
-        if (!project.launched) revert LErr(23);
-        LaunchpadToken(payable(project.token)).launchpadSetExternalLpProcessingEnabled(enabled);
-    }
-
-    function processProjectExternalLpByToken(address token) external onlyOwner nonReentrant {
-        uint256 projectId = _projectIdByToken(token);
-        Project storage project = projects[projectId];
-        if (!project.launched) revert LErr(23);
-        LaunchpadToken(payable(project.token)).launchpadProcessExternalLp();
-    }
-
     function sweepProjectExternalLpFeesByToken(
         address token,
         address receiver
@@ -1049,15 +1019,6 @@ contract RooBscLaunchpad {
         if (bnbAmount == 0) revert LErr(22);
         project.lpBnbBuffer = 0;
         _sendValue(receiver, bnbAmount);
-    }
-
-    function resetDividendsAndSweepByToken(
-        address token,
-        address receiver
-    ) external onlyOwner nonReentrant {
-        uint256 projectId = _projectIdByToken(token);
-        Project storage project = projects[projectId];
-        LaunchpadToken(payable(project.token)).launchpadResetDividendsAndSweep(receiver);
     }
 
     function _rescueLaunchLiquidity(uint256 projectId, address receiver) private {
@@ -1292,7 +1253,7 @@ contract RooBscLaunchpad {
         if (!project.taxEnabled) {
             return 0;
         }
-        uint256 bps = (uint256(project.projectTaxBps) * uint256(project.taxAllocation.lpTreasuryBps)) / BPS_DENOMINATOR;
+        uint256 bps = uint256(project.projectTaxBps);
         if (bps > type(uint16).max) {
             return type(uint16).max;
         }

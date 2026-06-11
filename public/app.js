@@ -324,16 +324,6 @@ const LAUNCHPAD_ABI = [
     type: "function"
   },
   {
-    inputs: [
-      { name: "token", type: "address" },
-      { name: "receiver", type: "address" }
-    ],
-    name: "resetDividendsAndSweepByToken",
-    outputs: [{ name: "", type: "uint256" }],
-    stateMutability: "nonpayable",
-    type: "function"
-  },
-  {
     inputs: [],
     name: "MIN_LAUNCH_THRESHOLD",
     outputs: [{ name: "", type: "uint256" }],
@@ -3374,7 +3364,6 @@ function setOwnerPanelButtonsEnabled(enabled) {
     "#ownerResumeExternalLp",
     "#ownerProcessExternalLp",
     "#ownerSweepExternalLp",
-    "#ownerResetDividends"
   ].forEach((selector) => {
     const button = $(selector);
     if (!button) {
